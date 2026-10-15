@@ -1,4 +1,4 @@
-# Proposta 2 — equalização/detecção neural Manchester-OOK 
+# Proposta 2 — equalização/detecção neural Manchester-OOK
 
 Esta pasta é um **ponto de partida experimental**, não um receptor validado nem
 um roteiro infalível. O objetivo é descobrir se aprendizado reduz erros frente
