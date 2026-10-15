@@ -54,14 +54,14 @@ Fonte → parser → codec/framing → Manchester → AFG/LED → canal → PD �
 
 | Critério | 1. Compressão temporal aprendida | 2. Equalização/detecção neural | 3. Controle adaptativo contextual |
 | --- | --- | --- | --- |
-| Objetivo | Reduzir carga além da compactação já existente | Reduzir erros e ampliar a região operacional | Selecionar configurações seguras conforme o enlace |
-| Dados atuais | PCAPs curtos; séries ainda não reconstruídas | Sem dataset físico nesta cópia; coleta parcialmente implementada | Sem dataset de controle; varredura de amplitude parcialmente implementada |
-| Principal risco | Codec clássico igualar ML; pouca diversidade clínica | Ganho desaparecer contra equalização clássica ou depender da referência TX | Melhor ponto fixo/heurística resolver o problema |
+| Objetivo | Reduzir carga além da compactação já existente | Aumentar robustez sob ruído controlado sobre capturas reais, mantendo desempenho na condição boa | Selecionar configurações seguras conforme o enlace |
+| Dados atuais | PCAPs curtos; séries ainda não reconstruídas | Coletor e piloto físico iniciais; campanha multissessão e avaliação com AWGN ainda pendentes | Sem dataset de controle; varredura de amplitude parcialmente implementada |
+| Principal risco | Codec clássico igualar ML; pouca diversidade clínica | AWGN isolado ser resolvido por detector clássico; ausência de ganho neural ou dependência da referência TX | Melhor ponto fixo/heurística resolver o problema |
 | Hardware | Dispensável no protótipo; necessário para validação física | Bancada existente para evidência experimental | Bancada existente se limitado ao AFG; outras ações exigem interfaces adicionais |
 | Alteração expressiva de hardware | Não prevista | Não prevista para ensaios em ar | Evitável restringindo ações; possível no escopo ampliado |
 | Baseline decisivo | Binário absoluto, delta e predição clássica | Integrador Manchester e equalizador clássico | Melhor configuração fixa e controlador por regras |
 | Viabilidade de artigo | Condicionada a dados e ganho específico do preditor | Candidata principal com bancada disponível | Condicionada a variação de canal e automação segura |
-| Recomendação | Não iniciar DL antes de medir compressibilidade | Priorizar piloto de coleta e baselines | Manter escopo inicial restrito; não começar com RL |
+| Recomendação | Não iniciar DL antes de medir compressibilidade | Preservar capturas sem ruído adicional e comparar detectores sob AWGN numérico controlado | Manter escopo inicial restrito; não começar com RL |
 
 ## 1. Compressão temporal aprendida com resíduos
 
@@ -114,19 +114,42 @@ Redução de 50% contra o legado pode ser uma meta exploratória, mas não compr
 
 **Potencial científico:** compressão causal com recuperação de estado e avaliação conjunta fonte-enlace pode ser publicável; “usar GRU em sinais vitais” ou comparar apenas com HL7 não é uma contribuição suficiente. O principal obstáculo continua sendo diversidade de dados e ganho sobre métodos simples.
 
-## 2. Equalização/detecção neural no receptor
+## 2. Equalização/detecção neural sob ruído controlado no receptor
 
 ### Ideia e pergunta de pesquisa
 
-Uma rede pequena processa janelas de amostras recebidas e estima bits, símbolos Manchester ou um sinal equalizado. Pode complementar ou substituir a integração e decisão pareada, aprendendo ISI, distorção não linear e variação do canal.
+Uma rede pequena processa janelas de amostras recebidas e estima bits, símbolos Manchester ou um sinal equalizado. Pode complementar ou substituir a integração e decisão pareada, explorando características do canal físico, como limitação de banda, ISI e distorção. O protótipo atual estima **bits após sincronização**, não reconstrói uma forma de onda limpa; sua avaliação principal é de detecção, não de remoção visual de ruído.
+
+**Motivação revisada:** na condição nominal da bancada, a BER observada é muito baixa ou não apresenta erros no volume inicial avaliado. O piloto de 100 tentativas teve zero erros em 39.600 bits de 99 capturas alinhadas e uma falha do sincronizador legado. A aquisição dessa falha continha outra cópia completa, recuperada offline com zero erros; esse reprocessamento não muda seu status original. Ainda não há ganho de ML demonstrado nem dados suficientes para caracterizar BER extremamente baixa.
+
+A figura de olho com BER aproximada de `8,78 × 10^-12` apresenta uma **estimativa baseada no olho/Q**, não uma taxa comprovada por contagem nos cerca de 10 mil bits representados. Assim, a proposta não será justificada por tentar reduzir uma BER nominal já quase nula: seguindo a sugestão do professor, o foco inicial passa a ser **robustez a ruído branco gaussiano deliberadamente adicionado, com intensidade controlada**.
 
 ```text
-PD/TIA → aquisição → sincronização → equalizador/detector → bits → integridade/parser
+PD/TIA → captura real preservada → adição numérica de AWGN
+  → processamento/sincronização → detectores clássico e neural → bits
 ```
 
-**Pergunta:** sob o mesmo orçamento de sincronização, uma rede melhora BER medida, erro por quadro e disponibilidade frente ao integrador Manchester e a equalizadores clássicos, inclusive em condições físicas não vistas?
+**Pergunta:** sob o mesmo orçamento de sincronização e as mesmas realizações de ruído, um detector neural melhora BER medida e erro por quadro em capturas VLC reais com degradação gaussiana controlada, frente a detectores clássicos adequados ao canal, generalizando entre sessões e níveis de ruído sem degradar a condição sem ruído adicional?
 
-É a candidata principal quando a bancada está acessível: rótulos vêm dos bits enviados, não exigem anotação clínica e a intervenção pode permanecer no software. Os pares TX/RX já são parcialmente disponibilizados e há salvamento de respostas; falta transformar isso em campanha reprodutível. PCAPs fornecem payloads de teste, não sinais ópticos de treino.
+É a candidata principal quando a bancada está acessível: rótulos vêm dos bits enviados, não exigem anotação clínica e a intervenção pode permanecer no software. Em `equalizador_neural/` já existem coletor, diagnóstico e comparação offline; a geração controlada de versões ruidosas e a campanha comparativa ainda precisam ser implementadas/validadas. A bancada adotada pelo usuário é a do capítulo 4 de Camporez, com LED CREE CXA1507 e receptor Hyperion, não automaticamente a bancada de LED azul do FINEP. PCAPs fornecem payloads de teste, não sinais ópticos de treino.
+
+### Onde introduzir ruído e o que isso demonstra
+
+| Ponto de injeção | Interpretação e escopo |
+| --- | --- |
+| **Digitalmente no RX capturado — opção inicial recomendada** | Combina um canal físico medido com degradação numérica reprodutível. Não exige alteração de hardware e permite comparar métodos exatamente nas mesmas amostras ruidosas. Deve ser descrito como estudo híbrido experimental-numérico, não como ruído fisicamente injetado na bancada. |
+| Na waveform antes do AFG | O ruído atravessa conversão, amplificação, LED e canal, sofrendo filtragem/não linearidade. Não equivale a AWGN no RX; pode alterar excursões e normalização do sinal, exigindo avaliação elétrica e limites seguros. Não é necessário na primeira etapa. |
+| Fisicamente na recepção | Exige instrumentação e ponto de acoplamento apropriados, com controle de banda, amplitude e segurança. É uma extensão possível, não pré-requisito do estudo inicial. |
+
+Para a opção numérica, preservar o RX original e gerar `y[n] = x_capturado[n] + sigma * z[n]`, com `z[n]` gaussiano de média zero e variância unitária, independente dos bits e das demais realizações. Registrar `sigma`, semente, ponto de injeção e ordem de processamento. A razão `10 log10(P_captura / sigma²)`, com potência AC da captura definida explicitamente, é uma **razão de referência para o ruído adicionado**, não a SNR física total: a captura já contém ruído e distorção. Não chamar esse eixo de `Eb/N0` sem conversão e definição de banda/energia apropriadas.
+
+Usar ponto flutuante na degradação pós-ADC; não impor clipping ou requantização `int8` implicitamente. Se esses efeitos forem estudados, constituem uma condição adicional e devem ser declarados. O RX original não é um alvo perfeitamente sem ruído; se uma futura versão reconstruir waveform, sua referência e métricas precisam ser definidas separadamente.
+
+### Por que AWGN não garante vantagem neural
+
+Com pulsos ideais conhecidos, sincronização perfeita e apenas AWGN, o filtro casado e a decisão apropriada já constituem o detector ótimo para bits equiprováveis nas hipóteses usuais. Para Manchester retangular ideal, a integração diferencial implementa essa referência. Uma CNN não deve ser apresentada como capaz de superar esse limite simplesmente por aprender a “remover ruído”.
+
+A hipótese de ganho está na **forma de onda real distorcida**, memória do canal ou variações entre sessões que o integrador retangular não modela. Por isso, comparar também com filtragem casada ao pulso medido e/ou equalização/detecção clássica adequada ao canal, estimadas somente com dados de treino ou pilotos autorizados. Superar apenas um integrador inadequado não basta. A adição de ruído é um método de ensaio legítimo, não uma contribuição de ML por si só.
 
 ### Sincronização: condição indispensável de validade
 
@@ -137,28 +160,33 @@ O sistema atual alinha e corrige polaridade usando todo o sinal TX. Há dois esc
 
 A segunda opção produz uma demonstração mais próxima de comunicação real, mas não comprova novidade de ML por si só. Não alimentar a rede com os bits desconhecidos de teste nem usar o payload TX como informação privilegiada apenas para um concorrente. O TX completo pode ser usado para rotular e medir erros offline, não como entrada operacional de um receptor declarado independente.
 
+Separar dois experimentos de degradação: **(a)** ruído após o alinhamento, mantendo posição/polaridade fixadas na captura original, avalia somente detecção com sincronização assistida; **(b)** ruído no RX bruto antes de normalização, reamostragem e sincronização exige reexecutar esses estágios e contabilizar suas falhas. O primeiro não demonstra robustez de sincronização ao ruído. No segundo, a assistência pelo TX completo continua presente enquanto não houver preâmbulo independente.
+
+O piloto revelou rejeição de uma cópia truncada na borda mesmo havendo outra completa. Foi implementada no coletor uma busca restrita a janelas completas, com correlação e limiar registrados; a validação MATLAB dessa mudança ainda está pendente. Fixar método, limiar e pré-processamento em treino/validação e aplicá-los igualmente aos detectores. Não atribuir recuperação por mudança do sincronizador ao ML, nem escolher posição/polaridade pelo menor erro contra os bits de teste.
+
 ### Coleta e plano experimental
 
-1. Aproveitar a infraestrutura existente e salvar bits TX, sinal TX ideal, aquisição bruta, taxa, parâmetros de aquisição e todas as tentativas/falhas de sincronismo. O retorno atual privilegia a aquisição bem-sucedida e precisa de extensão para rastrear falhas.
-2. Registrar sessão/dia, receptor, distância, alinhamento, iluminação, amplitude AFG, polarização e ganho quando conhecidos. Preservar escala/calibração vertical: a leitura atual retorna códigos do ADC, não tensão calibrada.
-3. Executar um piloto em ar, começando por um receptor e condições boas/degradadas. Variar distância, alinhamento e amplitude dentro de limites seguros; ampliar para outro receptor conforme disponibilidade.
-4. Construir baselines: integrador Manchester atual, filtro/equalizador linear treinado com orçamento comparável e, quando aplicável, MMSE/DFE. Avaliar a sincronização separadamente.
-5. Treinar primeiro MLP/CNN 1D pequena; aumentar complexidade apenas com ganho demonstrado. Janelas da mesma captura não podem ficar em treino e teste. Separar sessões/dias e reservar condições inteiras para generalização.
-6. Testar bits aleatórios e payloads clínicos não vistos, para evitar memorização de padrões. Registrar erro por quadro, BER, falhas de sincronismo, número de bits/erros, intervalos de confiança e custo de inferência.
-7. Comparar métodos sobre as mesmas aquisições offline e depois integrar a inferência à bancada. Medir throughput útil e latência incluindo upload/aquisição, não apenas execução da rede.
+1. Validar o coletor e o sincronizador em condição boa com a cadeia óptica ativa. Preservar bits TX, sinal TX ideal, RX bruto, metadados e todas as falhas, sem substituir originais por capturas “corrigidas”. Os testes iniciais com LED desligado não representam o enlace ativo.
+2. Coletar um piloto sem ruído adicional, mantendo inicialmente distância nominal de 2,4 m, alinhamento aproximadamente axial e configuração elétrica fixa. Registrar sessão/dia, horário/iluminação, amplitude, polarização e ganho quando conhecidos. O RX está em códigos ADC; registrar escala e evitar clipping de aquisição. Não é necessário degradar fisicamente a bancada nesta etapa.
+3. Planejar sessões independentes e separar treino/validação/teste **antes** de gerar ruído ou janelas. Todas as versões de uma captura e capturas correlacionadas da mesma sessão permanecem no mesmo split. Realizações sintéticas adicionais não substituem diversidade física nem aumentam o número de sessões independentes.
+4. Implementar a degradação numérica reproduzível, com níveis definidos no piloto/validação para cobrir condição sem ruído adicional, região de transição e degradação forte. Gerar várias realizações por nível; compartilhar cada entrada ruidosa entre todos os detectores. Guardar origem, seeds, potências e configurações em arquivos derivados separados.
+5. Construir baselines: integrador Manchester, detector linear regularizado atual, filtro casado ao pulso/canal medido e equalização clássica quando aplicável (por exemplo, MMSE/DFE). Distinguir o ridge atual de um equalizador completo. Equalizar orçamento de treino, contexto, pilotos e busca de hiperparâmetros.
+6. Treinar primeiro CNN 1D pequena com diversidade de ruído; comparar treino sem aumento de dados e com AWGN para separar benefício de arquitetura e augmentation. Testar generalização entre sessões e níveis de ruído reservados, com a mesma oportunidade de ajuste para os métodos clássicos.
+7. Testar bits aleatórios distintos e depois payloads representativos de telemetria não vistos. Medir curvas de BER e erro por quadro versus intensidade de ruído, além de falhas de sincronismo no experimento que as inclui. Reportar contagens, variação por sessão/realização e incerteza com comparação pareada; não tratar versões ruidosas da mesma captura como observações físicas independentes.
+8. Somente após demonstrar ganho específico de ML, planejar inferência no ciclo real. Separar tempo do detector, pré-processamento e aquisição. Ampliações para mudanças físicas de canal, outro receptor, ruído físico ou preâmbulo independente são extensões, não conclusões autorizadas pelo ensaio numérico inicial.
 
 Q e EOP são métricas auxiliares do sinal, não substitutos de BER medida ou provas automáticas do ganho do detector. A estimativa atual de Q separa níveis pelo sinal das amostras integradas; sua relação com erros deve ser verificada em condições degradadas. Não excluir falhas de sincronismo da avaliação de disponibilidade para apresentar uma BER artificialmente favorável.
 
 ### Critérios de sucesso e contribuição
 
-- Reduzir erros de maneira estatisticamente sustentada frente ao melhor baseline clássico, não somente ao integrador sem equalização.
-- Ampliar a região operacional para uma BER/erro por quadro alvo: distância, desalinhamento ou menor amplitude, com comparação controlada.
-- Generalizar para sessões e condições não vistas, sem degradar significativamente condições boas.
+- Reduzir BER/erro por quadro sob ruído adicionado de maneira estatisticamente sustentada frente ao melhor baseline clássico, não somente ao integrador sem equalização.
+- Tolerar maior potência de ruído adicionado para uma BER/erro por quadro alvo, ou exigir maior degradação para atingir esse limite, sob a mesma definição de potência e processamento. Não converter esse ganho automaticamente em distância, potência óptica ou margem física não medidas.
+- Generalizar para sessões e níveis de ruído não vistos, sem degradar significativamente a condição sem ruído adicional.
 - Manter custo de inferência compatível com o ciclo medido do sistema.
 
-**Potencial científico:** a contribuição deve estar na recepção Manchester-OOK experimental robusta sob banda limitada/distorção e transferência entre condições, não no uso isolado de CNN. A comparação entre sincronização assistida e por preâmbulo pode esclarecer quanto do desempenho depende da referência de bancada.
+**Potencial científico:** detecção Manchester-OOK aprendida sobre canais medidos, sob ruído controlado e com generalização entre sessões, pode sustentar uma contribuição híbrida experimental-numérica. A novidade deve estar na vantagem sobre referências clássicas fortes e na avaliação reprodutível, não em adicionar AWGN ou usar uma CNN. Ganhos só em dados totalmente sintéticos ou contra um baseline fraco não bastam. Não alegar remoção de ruído físico, receptor independente ou melhoria operacional clínica a partir desse escopo.
 
-Os riscos são ausência de erros suficientes no piloto, vantagem desaparecer contra equalização clássica e sobreajuste ao hardware. Saturação severa pode destruir informação; uma rede não recupera sinais inexistentes. O simulador atual precisa de validação/calibração antes de sustentar resultados físicos. Testes em água não são necessários para a primeira contribuição e só devem ser acrescentados se houver infraestrutura e escopo claros.
+Os riscos são inexistência de vantagem neural em AWGN, ganho desaparecer com um filtro adequado ao pulso real, vazamento entre versões da mesma captura, especialização em um nível de ruído e sobreajuste à bancada. Ruído pós-ADC não reproduz automaticamente ruído ambiente, shot noise, interferência colorida ou saturação física. Saturação severa pode destruir informação; uma rede não recupera sinais inexistentes. Testes em água não são necessários à primeira contribuição. Se os métodos clássicos igualarem a rede, o resultado não deve ser forçado a justificar ML.
 
 ## 3. Controle adaptativo contextual de configurações seguras
 
@@ -202,7 +230,7 @@ Não usar o Q igual a zero do fluxo atual como medição. Também não equiparar
 **Priorizar a proposta 2 como hipótese de trabalho, não como resultado garantido.** Ela atua diretamente no enlace, aproveita pares TX/RX já retornados pelo MATLAB, permite rótulos automáticos e não requer alteração expressiva de hardware para ensaios em ar.
 
 1. Consolidar uma coleta mínima reprodutível, com metadados e falhas, e medir o ciclo real de transmissão/aquisição.
-2. Executar um piloto com integrador Manchester e equalizador clássico em condições de degradação controlada.
+2. Diante da BER nominal muito baixa, preservar capturas reais sem ruído adicional e comparar integrador, referências clássicas adequadas ao canal e rede sob AWGN numérico controlado, declarando o caráter híbrido experimental-numérico.
 3. Definir sincronização assistida ou por preâmbulo e manter igualdade de informação entre métodos.
 4. Testar uma rede pequena em condições reservadas. Só ampliar coleta/modelo após encontrar ganho específico de ML.
 
@@ -214,7 +242,7 @@ A proposta 1 pode avançar em paralelo como análise de compressibilidade, sem t
 | --- | --- |
 | Predição clássica comprime tanto quanto ML | Não insistir na proposta 1 como artigo de ML; ampliar diversidade apenas se houver hipótese fundamentada. |
 | Equalização clássica iguala a rede | Não atribuir ganho ao ML; investigar condições físicas relevantes ou encerrar a hipótese. |
-| Enlace não apresenta erros na campanha | Não alegar redução de BER; ampliar condições seguras e volume ou mudar a pergunta. |
+| Enlace nominal não apresenta erros na campanha | Não alegar redução da BER nominal; avaliar robustez sob AWGN controlado sobre capturas reais, sem tratar o ruído numérico como injeção física ou garantia de ganho de ML. |
 | Ponto fixo/heurística resolve a adaptação | Não iniciar RL para criar complexidade artificial; reconsiderar a proposta 3. |
 | Bancada indisponível | Fazer parsers, codecs e protótipos em simulação, delimitando resultados; não apresentar validação experimental inexistente. |
 

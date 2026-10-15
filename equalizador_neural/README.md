@@ -18,9 +18,19 @@ O protótipo é de **detecção de bits depois da sincronização**, não de equ
 de forma de onda ou aprendizado fim a fim. A rede recebe apenas amostras RX;
 bits TX entram como rótulos e referência de avaliação. Entretanto, o alinhamento
 e a polaridade ainda usam o TX inteiro: o resultado é explicitamente
-`assisted_full_tx`. A correlação atual não tem limiar de confiança, portanto
-`status=ok` significa que ela retornou uma janela válida, não que o sincronismo
-está comprovadamente correto. Um falso alinhamento pode aparecer como erro de bits.
+`assisted_full_tx`. O coletor agora usa `valid_window_pearson_v1`: busca apenas
+janelas que contenham um quadro inteiro, escolhendo a maior correlação de Pearson
+absoluta e corrigindo a polaridade pelo sinal dessa correlação. Não escolhe a
+janela pela BER. Isso evita rejeitar uma captura apenas porque o maior pico global
+pertence a uma cópia truncada na borda do registro, como ocorreu no piloto.
+
+O limiar mínimo é **0,5 por padrão, exploratório e ainda não calibrado**. Pode ser
+passado como oitavo argumento de `collect_capture`; chamadas antigas de sete
+argumentos continuam válidas. `status=ok` indica recorte completo com score acima
+do limiar, não prova de sincronismo correto. Falsos alinhamentos ainda podem
+ocorrer. Antes de avaliar AWGN, fixe o critério usando treino/validação, registre
+falhas e não ajuste o limiar olhando o teste. A assistência TX continua explícita
+e comum a todos os detectores.
 
 O baseline linear aprende uma decisão bipolar a partir da mesma janela da CNN
 (mínimos quadrados/MMSE empírico com regularização ridge). É um baseline clássico
@@ -42,12 +52,12 @@ médicos, pacientes, gateway ou UI para estudar o receptor.
 | Preciso saber | Por que importa / caminho provisório | Resposta fornecida / situação atual |
 | --- | --- | --- |
 | Qual LED, amplificador, PD/TIA e ganho? Qual corrente de polarização e limites térmicos/elétricos? | Não consigo recomendar uma faixa segura de amplitude sem isso. Registre as configurações e consulte o responsável. Amplitude AFG não é potência óptica. | Por orientação do usuário, adotar os componentes do cap. 4 de Camporez: LED CREE CXA1507 5000K, amplificador Juntek DPA-2698 (6 dB), Bias-Tee Picosecond Pulse Labs 5575A e receptor Hyperion. A faixa de 100–300 mA é histórica dos ensaios da tese, não corrente atual confirmada nem autorização de operação. Permanecem pendentes corrente efetiva, ganho/configuração do receptor e limites seguros atuais. Conferir o limite do Bias-Tee; Klaas informa 500 mA para o 5575A. |
-| Qual versão de MATLAB, toolboxes e driver VISA estão instalados? | O legado usa VISA e funções como `rectpulse`, `alignsignals`, `resample` e `rms`; o coletor depende desse ambiente funcional. Não instala nem corrige drivers. | Confirmado por saída do PC: MATLAB R2021a (9.10.0.1602886), Windows 11 Pro; Communications Toolbox 7.5, Signal Processing Toolbox 8.6 e Instrument Control Toolbox 4.4 instalados. `rectpulse`, `alignsignals`, `resample`, `rms`, `visa` e `visadev` localizados. `instrhwinfo('visa')` informa adaptador `ni`; `JarFileVersion = Version 4.4` não identifica a versão do driver NI-VISA. Versão do driver e compatibilidade do novo diagnóstico ainda não verificadas. |
+| Qual versão de MATLAB, toolboxes e driver VISA estão instalados? | O legado usa VISA e funções como `rectpulse`, `alignsignals`, `resample` e `rms`; o coletor depende desse ambiente funcional. Não instala nem corrige drivers. | Confirmado no PC: MATLAB R2021a (9.10.0.1602886), Windows 11 Pro; Communications Toolbox 7.5, Signal Processing Toolbox 8.6 e Instrument Control Toolbox 4.4 instalados. Funções necessárias localizadas e adaptador `ni` disponível. Os três testes de `test_match_diagnostic_payload` passaram e `diagnose_capture` executou comunicação física com sucesso em 15/10/2026. Isso não valida ainda `collect_capture`, o pipeline Python ou a integração neural. Versão exata do NI-VISA pendente; `JarFileVersion = Version 4.4` não é a versão desse driver. |
 | É o mesmo MDO para TX/RX? Em qual canal está o PD? | A chamada permite dois objetos distintos ou o mesmo objeto; o canal é argumento explícito. O legado costuma usar CH1. Confirme fisicamente. | Confirmado pelo usuário: mesmo MDO para TX/RX; fotodetector no canal 1 (CH1). |
 | A aquisição entrega códigos ADC ou volts calibrados? | Nesta cópia, `readSamples()` retorna códigos `int8` convertidos para double. Não chame isso de volts. Para converter, é necessário conhecer/registrar o preâmbulo vertical, como YMULT, YOFF e YZERO, validando a fórmula com o instrumento. | Confirmado pelo método fornecido pelo usuário: `RIBinary`, largura de 1 byte, conversão `int8`→`double`, sem aplicar calibração vertical. RX bruto está em códigos ADC, não volts; taxa de amostragem é obtida de `XINcr`, com fallback estimado quando inválido. |
-| Taxa real, tamanho do registro, trigger e escala vertical? | Defaults: 1 Mbps, 10 amostras/bit, registro de 10.000 pontos. Confirme no instrumento e no código executado, não apenas no README. | Adotar provisoriamente 1 Mbps, **não verificado na prática**. Usuário enviará fotos do osciloscópio. `matlab/diagnose_capture.m` também registra consultas de configuração, sem substituir a verificação visual; taxa RX e número de amostras ficam salvos por leitura. |
-| O AFG repete continuamente o quadro? O registro inclui uma cópia completa? | A sincronização atual exige uma janela completa sem wrap-around. Se cruza o limite do registro, ajuste aquisição/tamanho de quadro ou implemente enquadramento próprio. Não recorte manualmente só os casos bons. | Pendente de teste: criado `matlab/diagnose_capture.m`, usando o MDO já inicializado, CH1 e payloads aleatórios conhecidos. Salva RX bruto e procura correspondências completas não sobrepostas; duas ou mais sugerem repetição dentro do registro, não provam emissão contínua. Limiares são exploratórios; ausência de correspondência não prova ausência física do quadro. Não executado na bancada. |
-| `CURVe?` retorna a forma de onda nova? | O upload atual espera 50 ms. Isso reduz um problema conhecido de captura antiga, mas não garante novidade em todos os setups. Use payloads distintos por chamada e verifique atualização/trigger; aumente a espera apenas com evidência. | Pendente de teste: o diagnóstico faz seis uploads com payloads distintos e duas leituras após cada upload, sem reenviar entre elas; compara cada RX com o payload atual e o anterior, salvando scores, BER assistida e resultado inconclusivo quando necessário. A segunda leitura tem espera adicional de 200 ms; não é uma medição precisa do instante de atualização do instrumento. Não executado na bancada. |
+| Taxa real, tamanho do registro, trigger e escala vertical? | Defaults: 1 Mbps, 10 amostras/bit, registro de 10.000 pontos. Confirme no instrumento e no código executado, não apenas no README. | Verificado na rodada ativa de 15/10/2026 por consultas, arquivos e fotos: 10.000 pontos, RX a 10 MS/s, janela aproximada de 1 ms, horizontal de 100 µs/div; CH1 em 500 mV/div, AC e 1 MΩ; trigger Edge/Auto, aquisição ligada em modo Sample. Fonte, nível e borda do trigger ainda pendentes. TX configurado em 1 Mbps e 10 amostras/bit; quadro de 400 bits com período AFG de 400 µs. Teste de zeros Manchester apresentou pico espectral de 1 MHz, compatível com a taxa nominal, sem calibração independente de relógio. Com LED ligado, CH1 em 100 mV/div atingiu +127 em 26,35% das amostras; em 500 mV/div, o teste periódico ficou entre −36 e +39, sem atingir os limites ADC. Isso não comprova ausência de distorção anterior ao ADC. |
+| O AFG repete continuamente o quadro? O registro inclui uma cópia completa? | A sincronização atual exige uma janela completa sem wrap-around. Se cruza o limite do registro, ajuste aquisição/tamanho de quadro ou implemente enquadramento próprio. Não recorte manualmente só os casos bons. | Na rodada `diagnostico_led_ligado_20261015_173013`, seis uploads distintos de 400 bits, com duas leituras por upload, tiveram ao menos uma correspondência completa em cada um dos 12 registros; cinco registros tiveram duas correspondências não sobrepostas acima do limiar exploratório. Há evidência de repetição dentro dessas aquisições, não garantia universal de emissão contínua ou de enquadramento correto. Correlação com TX atual entre 0,883 e 0,923 e zero erros nas 4.800 decisões avaliadas; são seis payloads distintos lidos duas vezes, não 12 payloads independentes. Sincronização assistida pelo TX completo. |
+| `CURVe?` retorna a forma de onda nova? | O upload atual espera 50 ms. Isso reduz um problema conhecido de captura antiga, mas não garante novidade em todos os setups. Use payloads distintos por chamada e verifique atualização/trigger; aumente a espera apenas com evidência. | Na mesma rodada ativa, todas as 12 leituras reconheceram o payload atual. Nas dez leituras com referência anterior disponível, seus scores ficaram aproximadamente entre 0,142 e 0,174, bem abaixo dos scores atuais. Não houve indício de payload anterior nessa rodada, inclusive na primeira leitura após cada upload. O upload legado já espera 50 ms; a segunda leitura tem espera adicional de 200 ms. Resultado limitado a essa condição e amostra pequena, sem garantia geral de atualização nem medição precisa do instante de aquisição. As rodadas iniciais ocorreram com LED desligado, conforme confirmação posterior do usuário, e não devem ser usadas para avaliar BER, repetição ou atualização do enlace ativo. |
 | Há canal de retorno? O receptor operacional conhecerá o payload? | Para esta fase não há feedback operacional nem receptor independente; há apenas comparação offline assistida. Não use BER contra TX como observação online de um receptor independente. | Confirmado pelo usuário: TX/RX centralizados no mesmo PC e MDO, com acesso à entrada/saída e comparação de qualidade; manter escopo assistido por TX completo. Isso não confirma protocolo ACK/retransmissão. O script adicional de olho possui métricas estimadas do olho (`berEye`) distintas de BER por comparação de bits (`berLink`); sua figura não comprova contagem de erros nem atualização da aquisição. |
 | Como registrar distância, ângulo/desalinhamento e iluminação? | Escolha medidas reproduzíveis, unidades e uma convenção; se não há luxímetro, registre fonte/posição/estado da iluminação e explicite a limitação. | Usuário define distância fixa nominal de 2,4 m e alinhamento aproximadamente axial (0° nominal), com receptor quase diretamente abaixo do LED; geometria aproximada, não medida exata. Não haverá medição de iluminância. Montagem mantida fixa, com iluminação externa dependente do horário do dia; não equivale a iluminação constante entre sessões. Registrar horário e descrição das condições. |
 
@@ -119,6 +129,9 @@ end
 ```
 
 O coletor faz **uma tentativa por chamada**, sem usar `System1tx1rx.communicate()`.
+Sua sincronização é própria desta pasta; `SignalUtils.synchronizeSignals` e a
+pipeline legada não foram alterados. O diagnóstico exploratório usa sua própria
+busca/limiar e não deve ser confundido com o critério do coletor.
 No legado, até três leituras podem ocorrer e o retorno antecipado de falha perde
 informações relevantes. Aqui toda chamada concluída tenta salvar um arquivo,
 inclusive com erro. Interrupção/crash antes do `save` ainda pode perder a tentativa:
@@ -191,11 +204,29 @@ Obrigatórios para o leitor Python:
 
 Preserve também `rx_raw`, `tx_samples`, taxas de amostragem, estágio, mensagem de
 erro e tempos, como faz o coletor. São fundamentais para reprocessamento e auditoria.
+Novas capturas incluem `sync_method`, `sync_threshold` e `sync_info` (aceitação,
+score, início 1-based, deslocamento em amostras, polaridade, número de janelas
+candidatas e motivo). Falhas de sincronização também preservam essas informações
+quando disponíveis e o tempo gasto. Arquivos antigos sem esses campos não devem
+ser tratados como se tivessem usado o novo método. Preserve os originais; qualquer
+reprocessamento deve ir para uma pasta separada, com rastreabilidade. Não misture
+métodos de sincronização inadvertidamente numa campanha comparativa.
 O leitor mínimo não exige todos esses campos extras, mas sua ausência limita
 conclusões. Salve arrays, não objetos MATLAB. Dados e runs são ignorados pelo Git:
 isso evita commits acidentais, **não substitui armazenamento e backup**.
 
 ## 4. Instalar e exercitar o pipeline
+
+Para validar a mudança de sincronização no MATLAB, sem acessar instrumentos:
+
+```matlab
+results = runtests('test_synchronize_capture_samples');
+table(results)
+```
+
+Os testes cobrem cópia truncada com pico global mais forte, inversão/DC, última
+janela completa, registro curto, sinal constante, correlação insuficiente e
+limiar inválido. A execução no MATLAB da bancada ainda deve ser confirmada.
 
 Comandos a partir desta pasta; Python 3.10+ recomendado (inicialmente CPU):
 

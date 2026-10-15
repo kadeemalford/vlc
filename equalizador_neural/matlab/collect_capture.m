@@ -1,7 +1,12 @@
-function filename = collect_capture(txAnalyzer, rxAnalyzer, encoder, bits, channel, outDir, meta)
+function filename = collect_capture(txAnalyzer, rxAnalyzer, encoder, bits, channel, outDir, meta, syncThreshold)
 % Uma tentativa, sem retry oculto. Instrumentos devem estar configurados.
 % NAO configura amplitude, polarizacao, trigger nem liga/desliga a bancada.
 % meta: capture_id, session_id, condition_id, split (train/val/test), demais notas.
+% syncThreshold opcional: Pearson absoluto minimo (default exploratorio 0.5).
+% Busca apenas copias completas; nao usa a BER para aceitar/rejeitar a janela.
+if nargin < 8, syncThreshold = 0.5; end
+validateattributes(syncThreshold, {'numeric'}, ...
+    {'real', 'scalar', 'finite', '>', 0, '<=', 1});
 required = {'capture_id', 'session_id', 'condition_id', 'split'};
 for k = 1:numel(required)
     assert(isfield(meta, required{k}), 'Falta meta.%s', required{k});
@@ -17,6 +22,10 @@ params = encoder.getParameters();
 sps = params.resampleFactor;
 bit_rate = params.bitRate;
 sync_mode = 'assisted_full_tx';
+sync_method = 'valid_window_pearson_v1';
+sync_threshold = double(syncThreshold);
+sync_info = struct('method', sync_method, 'accepted', false, ...
+    'threshold', sync_threshold, 'reason', 'not_attempted');
 status = 'error';
 error_message = '';
 stage = 'encode';
@@ -42,12 +51,19 @@ try
     if tx.getSampleRate() ~= normalized.getSampleRate()
         normalized = SignalUtils.resampleSignalToMatchSampleRate(tx, normalized);
     end
-    aligned = SignalUtils.synchronizeSignals(tx, normalized);
-    rx_aligned = double(aligned.getSamples());
+    [candidate, sync_info] = synchronize_capture_samples( ...
+        tx_samples, normalized.getSamples(), sync_threshold);
+    if ~sync_info.accepted
+        error('collect_capture:syncRejected', ...
+            'Sincronizacao rejeitada: %s (score=%.4g, limiar=%.4g)', ...
+            sync_info.reason, sync_info.score, sync_threshold);
+    end
+    rx_aligned = double(candidate);
     assert(numel(rx_aligned) == numel(tx_bits)*sps && all(isfinite(rx_aligned)), 'Alinhamento invalido');
     sync_seconds = toc(timer);
     status = 'ok';
 catch ME
+    if strcmp(stage, 'synchronization'), sync_seconds = toc(timer); end
     error_message = [ME.identifier ': ' ME.message];
     warning('collect_capture:failed', '%s: %s', stage, error_message);
 end
@@ -56,6 +72,7 @@ metadata_json = jsonencode(meta);
 % -v7: tipos numericos/strings simples, legiveis por scipy.io.loadmat.
 save(filename, 'tx_bits', 'tx_samples', 'rx_raw', 'rx_aligned', ...
     'rx_sample_rate', 'tx_sample_rate', 'sps', 'bit_rate', 'sync_mode', ...
+    'sync_method', 'sync_threshold', 'sync_info', ...
     'status', 'stage', 'error_message', 'metadata_json', 'started_at_utc', ...
     'upload_seconds', 'acquisition_seconds', 'sync_seconds', 'total_seconds', '-v7');
 end
