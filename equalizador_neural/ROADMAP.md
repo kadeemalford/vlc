@@ -7,14 +7,17 @@ depender do histórico da conversa. Os ensaios descritos foram registrados pelo
 usuário em **15/10/2026**. Não confunda resultados observados, código implementado
 e atividades planejadas.
 
-**Estado resumido:** coleta física piloto funcional, nova sincronização validada
-em testes MATLAB e em uma captura nova, 100 capturas originais disponíveis em ZIP.
-AWGN sobre capturas reais, treino neural nesses dados e comparação científica
-**ainda não foram implementados/executados como campanha**.
+**Estado resumido (atualizado em 18/10/2026):** etapas A e B executadas no piloto,
+incluindo reprocessamento auditável, AWGN pós-alinhamento e pré-sincronização,
+verificação analítica e repetição com outra seed. Benchmark com integrador,
+template de médias de classe, ridge e CNN implementado/testado com sessões
+sintéticas; guardas recusam treinar o piloto físico de uma sessão. Ambiente CPU
+local preparado e suíte Python ampliada para 47 testes.
 
-**Próxima tarefa recomendada:** materializar o reprocessamento auditável do piloto
-em uma pasta derivada e implementar uma varredura exploratória de AWGN pós-alinhamento
-com o integrador Manchester. Não começar por treinar CNN nem pedir mais transmissões.
+**Próximo bloqueio real:** obter sessões físicas independentes de treino,
+validação e teste, conforme [CAMPANHA_BANCADA.md](CAMPANHA_BANCADA.md). Não fabricar
+splits renomeando o piloto e não multiplicar capturas virtuais como novas sessões.
+Nenhum ganho neural real foi demonstrado; não há treino neural com o piloto físico.
 
 Regras para o agente:
 
@@ -60,16 +63,27 @@ sincronismo e erro por quadro devem permanecer separados.
 
 | Arquivo/diretório | Uso e ressalva |
 | --- | --- |
-| [`README.md`](README.md) | Instruções, contrato `.mat`, perguntas da bancada, treino e avaliação. Algumas frases iniciais e pendências ainda refletem o estado anterior ao piloto; confronte com os resultados datados abaixo. |
+| [`README.md`](README.md) | Instruções, contrato `.mat`, perguntas da bancada, reprocessamento, treino e avaliação. Confronte instruções com os resultados e limites datados deste roadmap. |
 | [`matlab/collect_capture.m`](matlab/collect_capture.m) | Uma transmissão/leitura por chamada, sem retry oculto; salva inclusive falhas. Aceita limiar de sincronização como oitavo argumento opcional. |
 | [`matlab/synchronize_capture_samples.m`](matlab/synchronize_capture_samples.m) | Novo sincronizador assistido, `valid_window_pearson_v1`. |
 | [`matlab/test_synchronize_capture_samples.m`](matlab/test_synchronize_capture_samples.m) | Sete testes sem hardware, aprovados no MATLAB da bancada. |
 | [`matlab/diagnose_capture.m`](matlab/diagnose_capture.m) | Diagnóstico ativo de seis uploads × duas leituras, usando MDO já inicializado; substitui waveform/período. Não é dataset de treino. |
 | [`matlab/match_diagnostic_payload.m`](matlab/match_diagnostic_payload.m) | Busca diagnóstica de cópias completas; limiar exploratório distinto do coletor. Não usa BER para escolher a posição. |
 | [`matlab/test_match_diagnostic_payload.m`](matlab/test_match_diagnostic_payload.m) | Três testes aprovados no MATLAB da bancada. |
-| [`pipeline.py`](pipeline.py) | Leitor, janelas, integrador, ridge e CNN, treino/avaliação. Ainda sem varredura AWGN real e sem reprocessador persistente do ZIP. |
-| [`tests/test_pipeline.py`](tests/test_pipeline.py), [`make_demo.py`](make_demo.py) | Testes e dados sintéticos funcionais. Existência de testes não significa que foram executados nesta continuidade. Demo não valida desempenho físico. |
+| [`pipeline.py`](pipeline.py) | Protótipo original de treino/avaliação e funções reutilizadas pelo benchmark novo; smoke tests sintéticos aprovados. |
+| [`capture_sync.py`](capture_sync.py) | Busca offline equivalente ao algoritmo MATLAB para amostras na mesma taxa; integrador sem dependência de PyTorch. |
+| [`reprocess_captures.py`](reprocess_captures.py) | CLI auditável do ZIP, sem extração, preservando fonte e histórico em diretório novo. |
+| [`offline_dataset.py`](offline_dataset.py) | Leitor de artefatos completos com checksums, protocolo consistente e guardas de origem/sessões/splits. |
+| [`awgn.py`](awgn.py), [`awgn_sweep.py`](awgn_sweep.py) | AWGN determinístico, varreduras pós-alinhamento e pré-sincronização e previsão condicional do integrador. |
+| [`benchmark_detectors.py`](benchmark_detectors.py) | Benchmark com treino, augmentation opcional, seleção em validação e teste pareado; exige sessões independentes antes de criar modelos. |
+| [`export_results.py`](export_results.py) | Exporta agregados/gráficos e proveniência após verificar hashes, sem replicar dados brutos. |
+| [`tests/test_awgn.py`](tests/test_awgn.py), [`tests/test_benchmark_detectors.py`](tests/test_benchmark_detectors.py) | Testes de ruído, auditoria, indisponibilidade, guardas, benchmark e repetibilidade sintéticos. |
+| [`tests/test_reprocess_captures.py`](tests/test_reprocess_captures.py) | 20 testes de sincronização/reprocessamento, incluindo regressão opcional no ZIP real. |
+| [`tests/test_pipeline.py`](tests/test_pipeline.py), [`make_demo.py`](make_demo.py) | Testes e dados sintéticos funcionais; suíte executada offline. Demo não valida desempenho físico. |
 | [`requirements.txt`](requirements.txt) | NumPy, SciPy e PyTorch; avaliar instalação CPU. |
+| [`requirements-cpu.lock.txt`](requirements-cpu.lock.txt) | Snapshot do ambiente CPU Linux/Python 3.13.9 usado em 18/10/2026; `.venv/` já criada nesta máquina. |
+| [`reports/awgn_pilot_20261018/README.md`](reports/awgn_pilot_20261018/README.md) | Relatório e agregados versionáveis das quatro varreduras finais do piloto. |
+| [`CAMPANHA_BANCADA.md`](CAMPANHA_BANCADA.md) | Próxima coleta necessária, protocolo de sessões, segurança e transferência para o benchmark. |
 | [`../baseline_20261015_175101.zip`](../baseline_20261015_175101.zip) | Fonte original do piloto de 100 tentativas; verificar disponibilidade e checksum abaixo. |
 | `../vlc-system-matlab-alarm-care-pro-scripts/` | Cópia do legado. A melhoria de sincronização foi feita no protótipo, **não** no `SignalUtils` legado. |
 | `../bibliography/Camporez__2025___Thesis (40).pdf`, cap. 4 | Componentes adotados pelo usuário como setup correto. Não confundir com o LED azul do FINEP. |
@@ -206,51 +220,175 @@ sem sobrescrever nem extrair por cima dos originais. Resultado:
 | Split | Todos `train` |
 | Tempo total registrado original | Mediana ≈0,225 s; p95 ≈0,241 s; não inclui disco nem mede inferência neural |
 
-**Importante:** o reprocessamento foi apenas uma reprodução numérica em memória.
-Não existe ainda um comando persistente de reprocessamento nem pasta derivada com
-as 100 capturas atualizadas ou relatório auditável. Essa é uma tarefa pendente.
-Ausência de duplicações exatas não torna capturas da mesma sessão independentes.
+**Atualização de 18/10/2026:** a auditoria acima foi materializada por um comando
+persistente, com os mesmos resultados. Veja §4.5 para os artefatos. Ausência de
+duplicações exatas não torna capturas da mesma sessão independentes.
 
 Arquivos individuais foram enviados pelo usuário a `/home/murilo/Downloads/`;
 não depender dessa pasta para continuidade ou backup. O PC da bancada guardou o
 bloco em `C:\Users\DELL\Documents\murilobarroso\vlc\equalizador_neural\data\baseline_20261015_175101`.
 
-## 5. Próximas etapas ainda não executadas
+### 4.5 Reprocessamento persistente executado em 18/10/2026
 
-### A. Materializar dados derivados e auditoria — próxima tarefa
+- [x] Implementados `capture_sync.py`, `reprocess_captures.py` e 20 testes novos.
+- [x] Suíte completa: **27 testes Python aprovados**, incluindo os sete testes
+  anteriores do pipeline. O treino/CNN desse teste usa apenas o demo sintético;
+  não confundir com treinamento sobre o piloto físico.
+- [x] Regressão real: 100 aceitos, zero erros em 40.000 bits, 0042 recuperada na
+  amostra 2.006 com score 0,9085. Originais permanecem 99 `ok`/1 `error`.
+- [x] Leitor original de `pipeline.py` carregou os 100 derivados e seu integrador
+  confirmou zero erros. Hash do ZIP, dos 100 derivados e dos dois scripts foi
+  conferido contra o manifesto.
 
-- [ ] Verificar ZIP/checksum; ler nomes com segurança, sem extração com path traversal.
-- [ ] Criar ferramenta offline reproduzível de reprocessamento (Python ou MATLAB),
+Comando executado a partir de `equalizador_neural/`:
+
+```bash
+uv run --with numpy --with scipy python reprocess_captures.py \
+  --source ../baseline_20261015_175101.zip \
+  --out data/baseline_20261015_175101_sync_v1_audited \
+  --expected-sha256 e0653b423bfb800903f75f5b13b66db7aa32ac848e91ef4d8b3e04f925a339cf
+```
+
+Artefato principal local:
+`data/baseline_20261015_175101_sync_v1_audited/`, com:
+
+- `captures/`: os 100 `.mat` derivados; **somente essa subpasta** é dataset de entrada.
+- `frames.csv`: auditoria por captura, originais/derivados, métricas e hashes.
+- `summary.json`: métricas agregadas; continua uma sessão, split `train`.
+- `manifest.json`: `state=complete`, versão 1.0, limiar 0,5, versões de Python/
+  NumPy/SciPy, commit/estado Git, hashes do código e de fonte/membros/derivados.
+  O commit-base pode não conter os scripts novos: nessa execução `git_dirty=true`;
+  os hashes dos scripts identificam a implementação efetivamente executada.
+
+Também existe `data/baseline_20261015_175101_sync_v1/`, primeira execução durante
+o desenvolvimento. Não sobrescrevê-la; preferir a saída `_audited` acima.
+Artefatos em `data/` são ignorados pelo Git: preservar backup ou regenerar em
+**outro nome de saída**, pois a ferramenta recusa diretório já existente.
+
+Validação executada:
+
+```bash
+uv run --with numpy --with scipy --with 'torch>=2.2,<3' \
+  --index https://download.pytorch.org/whl/cpu \
+  python -m unittest discover -s tests -v
+```
+
+Sem PyTorch, rodar somente os 20 testes novos com NumPy/SciPy e
+`python -m unittest discover -s tests -p test_reprocess_captures.py -v`.
+O teste do piloto pula se o ZIP não estiver disponível; verificar skips antes
+de alegar regressão real. MATLAB não foi reexecutado nesta etapa offline.
+
+Limites explícitos: taxas TX/RX diferentes são **recusadas**; não há reamostragem
+Python silenciosamente tratada como equivalente ao MATLAB. Arquivos são validados
+e mantidos em RAM, com limites ZIP de 32 MiB por membro e 256 MiB no total.
+Falhas sem sinais recuperáveis continuam indisponíveis, sem BER imputada.
+Tempos originais foram preservados como tempos da tentativa de origem; campos
+`reprocess_seconds`/`reprocess_sync_seconds` são apenas computação offline, sem IO.
+Não usar o tempo total antigo como benchmark do método novo.
+
+### 4.6 AWGN e software de comparação executados offline em 18/10/2026
+
+- [x] Gerador `gaussian_iid_expected_variance_v1`, PCG64 com chave SHA-256 de
+  identidade/seed/checksum/nível/realização/fluxo. Sem reescalar o RMS dos draws.
+- [x] Potência AC de referência por captura, ponto flutuante sem clipping/requantização,
+  condição sem ruído preservada e manifestos com hashes/snapshots do código.
+- [x] Pós-alinhamento: grid −10, −8, −6, −4, −2, 0, 2, 4, 5, 6, 8, 10 dB; seed 42,
+  30 realizações por nível. BER 0,003695 em 0 dB, 0,0005175 em 2 dB e oito erros
+  em 1.200.000 decisões em 5 dB; em 6/8/10 dB, zero erros observados nessa amostra.
+- [x] Comparação com previsão analítica exata condicional às waveforms fixas e ao
+  AWGN: maior desvio de Monte Carlo ≈1,74 desvios padrão condicionais.
+- [x] Réplica com seed 2026 e dez realizações no mesmo grid; não é nova sessão física.
+- [x] Pré-sincronização numérica: reexecutada normalização e busca assistida,
+  mantendo limiar exploratório 0,5. Na varredura refinada com dez realizações,
+  −5 dB teve 0/1.000 aceitas; −4 dB teve 151/1.000; −3 dB teve 989/1.000.
+  BER só nas aceitas; indisponibilidade registrada separadamente. Não tratar
+  esse ruído pós-ADC como injeção física nem usar a previsão de alinhamento fixo.
+- [x] Benchmark com integrador, template de médias de classe, ridge e CNN;
+  augmentation opcional, estatísticas só do treino, seleção só em validação,
+  mesmos ruídos de teste para todos e bootstrap pareado por sessão. Template não
+  é FIR/MMSE/DFE completo. Sementes de modelo/noise e snapshots são registrados.
+- [x] Fluxo completo e repetibilidade numérica exercitados em sessões **sintéticas**.
+  Piloto físico recusado para treino antes de criar qualquer modelo. Nenhum
+  split fictício, CNN treinada em dados reais ou alegação de ganho neural.
+- [x] Suíte ampliada a 47 testes; fontes preservadas e exportações auditadas.
+
+Artefatos completos locais (ignorados pelo Git):
+
+| Run em `runs/` | Tipo |
+| --- | --- |
+| `awgn_pilot_refined_seed42` | Pós-alinhamento, 30 realizações |
+| `awgn_pilot_replication_seed2026` | Réplica pós-alinhamento, dez realizações |
+| `awgn_pilot_pre_sync_seed42` | Primeira varredura pré-sincronização, cinco realizações |
+| `awgn_pilot_pre_sync_transition_seed42` | Refinamento pré-sincronização, dez realizações |
+
+`awgn_pilot_coarse_seed42` é a primeira exploração, com namespace anterior do
+gerador e sem snapshots; preservada, mas não usada no relatório final. Não misturar
+suas receitas aleatórias com as da versão final.
+
+Os agregados/gráficos/proveniência estão em `reports/awgn_pilot_20261018/`; CSVs
+por realização e snapshots do código estão nas runs completas. Exportação compacta
+não substitui backup das runs/dados.
+
+Comandos de reprodução (a partir desta pasta; usar nomes novos se já existirem):
+
+```bash
+.venv/bin/python awgn_sweep.py \
+  --data data/baseline_20261015_175101_sync_v1_audited \
+  --out runs/awgn_pilot_refined_seed42 \
+  --ratios-db -10 -8 -6 -4 -2 0 2 4 5 6 8 10 --realizations 30 --seed 42
+
+.venv/bin/python awgn_sweep.py \
+  --data data/baseline_20261015_175101_sync_v1_audited \
+  --out runs/awgn_pilot_pre_sync_transition_seed42 \
+  --ratios-db -5 -4 -3 -2 0 2 5 --realizations 10 --seed 42 \
+  --point pre-synchronization
+
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+Não interpretar esse eixo como SNR física/EbN0, e não tratar os 1.200.000 bits
+avaliados por nível como bits novos transmitidos: são 30 ruídos dos mesmos 40.000.
+Os experimentos pré/pós usam potências e seleção de janelas diferentes; diferenças
+de BER não demonstram ganho de algoritmo. O próximo dado necessário é multissessão.
+
+## 5. Etapas concluídas e pendentes
+
+### A. Materializar dados derivados e auditoria — concluída para taxas iguais
+
+- [x] Verificar ZIP/checksum; ler nomes com segurança, sem extração com path traversal.
+- [x] Criar ferramenta offline reproduzível de reprocessamento (Python ou MATLAB),
   em pasta nova sob `data/`, preservando bytes dos originais.
-- [ ] Reproduzir normalização de pico, eventual reamostragem e novo sincronizador;
-  validar equivalência com MATLAB, especialmente captura 0042 e testes de borda.
-- [ ] Registrar fonte, checksum, status/erro originais, método/limiar derivados,
+- [x] Reproduzir normalização de pico e novo sincronizador com taxas iguais;
+  conferir resultados MATLAB de 0042 e testes de borda. Taxas diferentes recusadas.
+- [x] Registrar fonte, checksum, status/erro originais, método/limiar derivados,
   score, posição, polaridade e versão/commit da ferramenta. Não inventar tempo
   de aquisição ou transformar tempo de reprocessamento em tempo da bancada.
-- [ ] Gerar CSV/JSON por captura e resumo: aceitação, erros, clipping e duplicações.
-- [ ] Manter `session_id` e split originais. Capturas derivadas não são novas sessões.
+- [x] Gerar CSV/JSON por captura e resumo: aceitação, erros, limites ADC e duplicações.
+- [x] Manter `session_id` e split originais. Capturas derivadas não são novas sessões.
+- [ ] Se outra campanha exigir taxas diferentes, implementar e validar separadamente
+  a reamostragem equivalente ao MATLAB. Não é bloqueio para este piloto.
 
 **Aceitação:** reproduzir 100 aceitos/40.000 bits/zero erros neste piloto, preservar
 a falha original de 0042 e explicar qualquer divergência. Não escolher alinhamento
 por BER nem ajustar limiar para obter esse resultado.
 
-### B. AWGN exploratório pós-alinhamento — sem CNN inicialmente
+### B. AWGN exploratório pós-alinhamento — concluída no piloto, sem CNN real
 
-- [ ] Implementar gerador separado de AWGN com sementes explícitas e várias
+- [x] Implementar gerador separado de AWGN com sementes explícitas e várias
   realizações. Preservar versões sem ruído adicional; nunca modificar fonte.
-- [ ] Começar depois do alinhamento: avalia **detecção assistida**, não robustez
+- [x] Começar depois do alinhamento: avalia **detecção assistida**, não robustez
   da sincronização ao ruído. Não reescolher janela/polaridade olhando o ruído ou BER.
-- [ ] Definir potência de referência AC por captura e `y=x+sigma*z`, `z~N(0,1)`.
+- [x] Definir potência de referência AC por captura e `y=x+sigma*z`, `z~N(0,1)`.
   Registrar se `sigma` vem de variância esperada ou de normalização da realização.
   Não impor recorte/quantização ADC implicitamente após ruído numérico.
-- [ ] Nomear o eixo como razão da potência da captura para a do ruído adicionado;
+- [x] Nomear o eixo como razão da potência da captura para a do ruído adicionado;
   não tratá-lo como SNR física total nem `Eb/N0` sem definição/conversão apropriada.
   A captura original já contém ruído, e não é um alvo perfeitamente limpo.
-- [ ] Fazer varredura inicial ampla, refinada no piloto, para localizar região de
+- [x] Fazer varredura inicial ampla, refinada no piloto, para localizar região de
   transição do integrador. Não fixar uma faixa arbitrária como requisito científico.
-- [ ] Reportar erros/bits, erro por quadro e curvas por nível/realização; usar as
+- [x] Reportar erros/bits, erro por quadro e curvas por nível/realização; usar as
   mesmas entradas ruidosas para todos os futuros detectores.
-- [ ] Adicionar testes de determinismo, potência esperada, condição sem ruído,
+- [x] Adicionar testes de determinismo, potência esperada, condição sem ruído,
   preservação de fonte e associação inequívoca captura/seed/nível.
 
 **Aceitação:** curvas reproduzíveis, com condição sem ruído adicional recuperando
@@ -258,17 +396,19 @@ o baseline. Este bloco de uma sessão é exploratório, não avaliação neural 
 
 ### C. Preparar protocolo e dados para treino/generalização
 
-- [ ] Planejar sessões realmente independentes antes de coletar mais (dia/montagem
-  e condições correlacionadas), com splits por sessão. Não renomear cada quadro
-  como sessão nem dividir este piloto em treino/validação/teste aleatórios.
+- [x] Documentar plano de sessões independentes em `CAMPANHA_BANCADA.md`, com alvo
+  logístico inicial de duas de treino, duas de validação e três de teste, não
+  suficiência estatística garantida.
+- [ ] Obter essas sessões físicas independentes e confirmar metadados e limites.
+  Não renomear cada quadro como sessão nem dividir o piloto em splits aleatórios.
 - [ ] Registrar limites e pendências da bancada; ajustar índices/seeds por captura
   sem reiniciar o RNG com a mesma semente a cada quadro.
-- [ ] Gerar variantes de ruído **após** atribuir sessões aos splits. Todas as
-  variantes e janelas de uma origem permanecem no mesmo split.
+- [x] Implementar variantes pós-atribuição de splits e guardas de linhagem;
+  testar em sessões sintéticas. Todas as variantes/janelas permanecem na origem.
 - [ ] Reservar sessões e níveis para teste; congelar escolhas usando treino/validação.
   Mais realizações de AWGN não substituem mais sessões físicas.
-- [ ] Validar ambiente Python/CPU e rodar os testes existentes. Não assumir que
-  o treino ou a suíte Python foram executados no PC da bancada nesta sessão.
+- [x] Validar ambiente Python/CPU e rodar os testes existentes offline em Linux
+  em 18/10/2026. Isso não verifica instalação Python no PC da bancada nem treino real.
 
 ```bash
 # A partir de equalizador_neural/, em ambiente com requirements.txt instalado:
@@ -277,8 +417,11 @@ python -m unittest discover -s tests -v
 
 ### D. Comparar referências e modelo neural
 
+- [x] Preparar e testar software de comparação com augmentation opcional,
+  guardas, pareamento de ruídos, métricas e bootstrap por sessão.
 - [ ] Integrador, ridge e filtro/detector adequado ao pulso/canal medido; avaliar
-  FIR/MMSE/DFE se pertinentes. Ridge atual não é um equalizador completo de waveform.
+  em sessões físicas independentes, incluindo FIR/MMSE/DFE se pertinentes.
+  Template de médias de classe já implementado não é um equalizador completo.
 - [ ] Estimar pulso/canal e ajustar hiperparâmetros apenas com dados autorizados
   de treino/pilotos. Equalizar contexto, orçamento de treino e informação disponível.
 - [ ] Treinar CNN pequena; comparar com/sem augmentation e várias seeds predefinidas.
@@ -291,7 +434,7 @@ python -m unittest discover -s tests -v
 
 ### E. Extensões condicionais e artigo
 
-- [ ] Ruído no RX bruto **antes** da normalização/reamostragem/sincronização:
+- [x] Ruído no RX bruto **antes** da normalização/sincronização (taxas iguais):
   reexecutar todo o processamento, registrar rejeições e avaliar disponibilidade.
   Não confundir com o experimento B de alinhamento fixo.
 - [ ] Só depois: preâmbulo independente de payload, outros canais/receptores,
@@ -331,5 +474,6 @@ resultados e limitações. Marque checkboxes apenas após execução comprovada.
 Identifique mudanças de protocolo ou setup e o que foi apenas implementado versus
 testado. Mantenha uma próxima tarefa concreta e registre onde estão os artefatos.
 
-**Não há até este ponto resultado de superioridade neural, curva AWGN real,
-dataset multissessão validado ou artigo concluído.**
+**Há curvas de AWGN numérico sobre capturas reais; não há até este ponto
+superioridade neural, injeção física de ruído, dataset físico multissessão
+validado ou artigo concluído.**

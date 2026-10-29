@@ -55,7 +55,7 @@ Fonte → parser → codec/framing → Manchester → AFG/LED → canal → PD �
 | Critério | 1. Compressão temporal aprendida | 2. Equalização/detecção neural | 3. Controle adaptativo contextual |
 | --- | --- | --- | --- |
 | Objetivo | Reduzir carga além da compactação já existente | Aumentar robustez sob ruído controlado sobre capturas reais, mantendo desempenho na condição boa | Selecionar configurações seguras conforme o enlace |
-| Dados atuais | PCAPs curtos; séries ainda não reconstruídas | Coletor e piloto físico iniciais; campanha multissessão e avaliação com AWGN ainda pendentes | Sem dataset de controle; varredura de amplitude parcialmente implementada |
+| Dados atuais | PCAPs curtos; séries ainda não reconstruídas | Piloto físico e varreduras AWGN do integrador executados; comparação neural real depende de campanha multissessão | Sem dataset de controle; varredura de amplitude parcialmente implementada |
 | Principal risco | Codec clássico igualar ML; pouca diversidade clínica | AWGN isolado ser resolvido por detector clássico; ausência de ganho neural ou dependência da referência TX | Melhor ponto fixo/heurística resolver o problema |
 | Hardware | Dispensável no protótipo; necessário para validação física | Bancada existente para evidência experimental | Bancada existente se limitado ao AFG; outras ações exigem interfaces adicionais |
 | Alteração expressiva de hardware | Não prevista | Não prevista para ensaios em ar | Evitável restringindo ações; possível no escopo ampliado |
@@ -131,7 +131,7 @@ PD/TIA → captura real preservada → adição numérica de AWGN
 
 **Pergunta:** sob o mesmo orçamento de sincronização e as mesmas realizações de ruído, um detector neural melhora BER medida e erro por quadro em capturas VLC reais com degradação gaussiana controlada, frente a detectores clássicos adequados ao canal, generalizando entre sessões e níveis de ruído sem degradar a condição sem ruído adicional?
 
-É a candidata principal quando a bancada está acessível: rótulos vêm dos bits enviados, não exigem anotação clínica e a intervenção pode permanecer no software. Em `equalizador_neural/` já existem coletor, diagnóstico e comparação offline; a geração controlada de versões ruidosas e a campanha comparativa ainda precisam ser implementadas/validadas. A bancada adotada pelo usuário é a do capítulo 4 de Camporez, com LED CREE CXA1507 e receptor Hyperion, não automaticamente a bancada de LED azul do FINEP. PCAPs fornecem payloads de teste, não sinais ópticos de treino.
+É a candidata principal quando a bancada está acessível: rótulos vêm dos bits enviados, não exigem anotação clínica e a intervenção pode permanecer no software. Em `equalizador_neural/` já existem coletor, diagnóstico, reprocessamento auditável e varreduras AWGN executadas no piloto real. O benchmark de detectores foi implementado e testado funcionalmente com sessões sintéticas; a comparação neural real ainda depende de sessões físicas independentes. A bancada adotada pelo usuário é a do capítulo 4 de Camporez, com LED CREE CXA1507 e receptor Hyperion, não automaticamente a bancada de LED azul do FINEP. PCAPs fornecem payloads de teste, não sinais ópticos de treino.
 
 ### Onde introduzir ruído e o que isso demonstra
 
@@ -162,7 +162,13 @@ A segunda opção produz uma demonstração mais próxima de comunicação real,
 
 Separar dois experimentos de degradação: **(a)** ruído após o alinhamento, mantendo posição/polaridade fixadas na captura original, avalia somente detecção com sincronização assistida; **(b)** ruído no RX bruto antes de normalização, reamostragem e sincronização exige reexecutar esses estágios e contabilizar suas falhas. O primeiro não demonstra robustez de sincronização ao ruído. No segundo, a assistência pelo TX completo continua presente enquanto não houver preâmbulo independente.
 
-O piloto revelou rejeição de uma cópia truncada na borda mesmo havendo outra completa. Foi implementada no coletor uma busca restrita a janelas completas, com correlação e limiar registrados; a validação MATLAB dessa mudança ainda está pendente. Fixar método, limiar e pré-processamento em treino/validação e aplicá-los igualmente aos detectores. Não atribuir recuperação por mudança do sincronizador ao ML, nem escolher posição/polaridade pelo menor erro contra os bits de teste.
+O piloto revelou rejeição de uma cópia truncada na borda mesmo havendo outra completa. Foi implementada no coletor uma busca restrita a janelas completas, com correlação e limiar registrados, validada no MATLAB e no reprocessamento do piloto. O limiar 0,5 continua exploratório e não calibrado. Fixar método, limiar e pré-processamento em treino/validação e aplicá-los igualmente aos detectores. Não atribuir recuperação por mudança do sincronizador ao ML, nem escolher posição/polaridade pelo menor erro contra os bits de teste.
+
+### Estado do piloto offline (18/10/2026)
+
+As 100 capturas de uma sessão foram reprocessadas, preservando originais: 100 alinhamentos derivados aceitos e zero erros em 40.000 bits. Com AWGN pós-alinhamento, o integrador apresentou BER 0,003695 em 0 dB e 0,0005175 em 2 dB da razão captura/ruído adicional; foram usadas 30 realizações das mesmas capturas, não novas sessões. Os resultados acompanharam a previsão analítica condicional do integrador. Antes da sincronização, −5 dB produziu zero aceitações em 1.000 tentativas virtuais: BER desconhecida e indisponibilidade, não BER zero.
+
+Esses resultados verificam o ensaio numérico e localizam uma faixa de degradação; **não demonstram ganho neural**. O benchmark recusou treinar o piloto por faltar validação/teste em sessões independentes. Relatório, artefatos compactos e próxima campanha estão em `equalizador_neural/reports/awgn_pilot_20261018/README.md` e `equalizador_neural/CAMPANHA_BANCADA.md`.
 
 ### Coleta e plano experimental
 

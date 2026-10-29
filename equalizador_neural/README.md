@@ -2,8 +2,12 @@
 
 Esta pasta é um **ponto de partida experimental**, não um receptor validado nem
 um roteiro infalível. O objetivo é descobrir se aprendizado reduz erros frente
-a métodos clássicos, nas mesmas aquisições e condições não vistas. Não há aqui
-resultados físicos, dataset coletado ou ganho comprovado de ML.
+a métodos clássicos, nas mesmas aquisições e condições não vistas. Já existe um
+piloto físico de uma sessão, reprocessado offline com rastreabilidade e avaliado
+sob AWGN numérico controlado. Não há ganho comprovado de ML ou avaliação física
+multissessão. Consulte [ROADMAP.md](ROADMAP.md), o
+[relatório do piloto](reports/awgn_pilot_20261018/README.md) e a
+[próxima campanha](CAMPANHA_BANCADA.md).
 
 ## O que já está implementado
 
@@ -13,6 +17,13 @@ resultados físicos, dataset coletado ou ganho comprovado de ML.
 | `pipeline.py` | Treino e avaliação offline: integrador Manchester, detector linear regularizado e CNN 1D pequena. |
 | `make_demo.py` | Dataset sintético para testar a instalação e o fluxo, **não** para demonstrar desempenho físico. |
 | `tests/test_pipeline.py` | Testes de mapeamento, janelas, vazamento, falhas e execução completa. |
+| `capture_sync.py` | Versão numérica offline da busca de janelas completas, sem PyTorch ou hardware. |
+| `reprocess_captures.py` | Reprocessa um ZIP original em pasta nova, preserva histórico e gera `.mat`, CSV e manifesto com checksums. |
+| `tests/test_reprocess_captures.py` | Testes offline, incluindo borda truncada, preservação de origem, ZIP inseguro e regressão opcional no piloto real. |
+| `offline_dataset.py` | Confere manifestos/checksums, protocolo, origem e separação de sessões/splits. |
+| `awgn.py`, `awgn_sweep.py` | Ruído numérico reproduzível e curvas do integrador, após alinhamento fixo ou antes da sincronização; inclui previsão analítica condicional no primeiro caso. |
+| `benchmark_detectors.py` | Comparação com integrador, template de médias de classe, ridge e CNN, com augmentation opcional. Exige sessões independentes; validado funcionalmente em dados sintéticos. |
+| `export_results.py` | Exporta agregados/gráficos verificados, sem RX bruto, pesos ou CSVs volumosos de realizações. |
 
 O protótipo é de **detecção de bits depois da sincronização**, não de equalização
 de forma de onda ou aprendizado fim a fim. A rede recebe apenas amostras RX;
@@ -52,7 +63,7 @@ médicos, pacientes, gateway ou UI para estudar o receptor.
 | Preciso saber | Por que importa / caminho provisório | Resposta fornecida / situação atual |
 | --- | --- | --- |
 | Qual LED, amplificador, PD/TIA e ganho? Qual corrente de polarização e limites térmicos/elétricos? | Não consigo recomendar uma faixa segura de amplitude sem isso. Registre as configurações e consulte o responsável. Amplitude AFG não é potência óptica. | Por orientação do usuário, adotar os componentes do cap. 4 de Camporez: LED CREE CXA1507 5000K, amplificador Juntek DPA-2698 (6 dB), Bias-Tee Picosecond Pulse Labs 5575A e receptor Hyperion. A faixa de 100–300 mA é histórica dos ensaios da tese, não corrente atual confirmada nem autorização de operação. Permanecem pendentes corrente efetiva, ganho/configuração do receptor e limites seguros atuais. Conferir o limite do Bias-Tee; Klaas informa 500 mA para o 5575A. |
-| Qual versão de MATLAB, toolboxes e driver VISA estão instalados? | O legado usa VISA e funções como `rectpulse`, `alignsignals`, `resample` e `rms`; o coletor depende desse ambiente funcional. Não instala nem corrige drivers. | Confirmado no PC: MATLAB R2021a (9.10.0.1602886), Windows 11 Pro; Communications Toolbox 7.5, Signal Processing Toolbox 8.6 e Instrument Control Toolbox 4.4 instalados. Funções necessárias localizadas e adaptador `ni` disponível. Os três testes de `test_match_diagnostic_payload` passaram e `diagnose_capture` executou comunicação física com sucesso em 15/10/2026. Isso não valida ainda `collect_capture`, o pipeline Python ou a integração neural. Versão exata do NI-VISA pendente; `JarFileVersion = Version 4.4` não é a versão desse driver. |
+| Qual versão de MATLAB, toolboxes e driver VISA estão instalados? | O legado usa VISA e funções como `rectpulse`, `alignsignals`, `resample` e `rms`; o coletor depende desse ambiente funcional. Não instala nem corrige drivers. | Confirmado no PC: MATLAB R2021a (9.10.0.1602886), Windows 11 Pro; Communications Toolbox 7.5, Signal Processing Toolbox 8.6 e Instrument Control Toolbox 4.4 instalados. Funções necessárias localizadas e adaptador `ni` disponível. Três testes diagnósticos e sete do novo sincronizador passaram no MATLAB; coletor validado em captura física com o novo método. Suíte Python também exercitada offline (treino neural apenas sintético em teste funcional), sem integração neural real. Versão exata do NI-VISA pendente; `JarFileVersion = Version 4.4` não é a versão desse driver. |
 | É o mesmo MDO para TX/RX? Em qual canal está o PD? | A chamada permite dois objetos distintos ou o mesmo objeto; o canal é argumento explícito. O legado costuma usar CH1. Confirme fisicamente. | Confirmado pelo usuário: mesmo MDO para TX/RX; fotodetector no canal 1 (CH1). |
 | A aquisição entrega códigos ADC ou volts calibrados? | Nesta cópia, `readSamples()` retorna códigos `int8` convertidos para double. Não chame isso de volts. Para converter, é necessário conhecer/registrar o preâmbulo vertical, como YMULT, YOFF e YZERO, validando a fórmula com o instrumento. | Confirmado pelo método fornecido pelo usuário: `RIBinary`, largura de 1 byte, conversão `int8`→`double`, sem aplicar calibração vertical. RX bruto está em códigos ADC, não volts; taxa de amostragem é obtida de `XINcr`, com fallback estimado quando inválido. |
 | Taxa real, tamanho do registro, trigger e escala vertical? | Defaults: 1 Mbps, 10 amostras/bit, registro de 10.000 pontos. Confirme no instrumento e no código executado, não apenas no README. | Verificado na rodada ativa de 15/10/2026 por consultas, arquivos e fotos: 10.000 pontos, RX a 10 MS/s, janela aproximada de 1 ms, horizontal de 100 µs/div; CH1 em 500 mV/div, AC e 1 MΩ; trigger Edge/Auto, aquisição ligada em modo Sample. Fonte, nível e borda do trigger ainda pendentes. TX configurado em 1 Mbps e 10 amostras/bit; quadro de 400 bits com período AFG de 400 µs. Teste de zeros Manchester apresentou pico espectral de 1 MHz, compatível com a taxa nominal, sem calibração independente de relógio. Com LED ligado, CH1 em 100 mV/div atingiu +127 em 26,35% das amostras; em 500 mV/div, o teste periódico ficou entre −36 e +39, sem atingir os limites ADC. Isso não comprova ausência de distorção anterior ao ADC. |
@@ -226,7 +237,7 @@ table(results)
 
 Os testes cobrem cópia truncada com pico global mais forte, inversão/DC, última
 janela completa, registro curto, sinal constante, correlação insuficiente e
-limiar inválido. A execução no MATLAB da bancada ainda deve ser confirmada.
+limiar inválido. Os sete testes passaram no MATLAB R2021a da bancada em 15/10/2026.
 
 Comandos a partir desta pasta; Python 3.10+ recomendado (inicialmente CPU):
 
@@ -246,7 +257,155 @@ O comando acima é a alternativa mais simples, mas pode baixar dependências GPU
 O demo testa o fluxo; seu canal é artificial, sincronizado por construção, sem
 calibração na bancada. Qualquer ganho nele **não valida** a proposta científica.
 
-Com dados reais:
+### Reprocessar o piloto original sem acessar instrumentos
+
+Esta etapa requer somente NumPy e SciPy. A partir de `equalizador_neural/`, use
+um ambiente Python com essas dependências, ou `uv run --with numpy --with scipy`
+antes de `python` nos comandos abaixo:
+
+```bash
+python -m unittest discover -s tests -p test_reprocess_captures.py -v
+python reprocess_captures.py \
+  --source ../baseline_20261015_175101.zip \
+  --out data/baseline_20261015_175101_sync_v1_audited \
+  --expected-sha256 e0653b423bfb800903f75f5b13b66db7aa32ac848e91ef4d8b3e04f925a339cf
+```
+
+O comando foi executado em 18/10/2026. Se essa saída já existir, escolha **outra
+pasta**, não apague nem sobrescreva a anterior. O teste real é opcional e só roda
+quando o ZIP está disponível na raiz do projeto; não distribui dados com os testes.
+
+Saídas:
+
+- `captures/`: somente os `.mat` derivados, mantendo IDs, sessão, split, bits,
+  TX ideal e RX bruto. Use **esta subpasta** como dataset do leitor Python.
+- `frames.csv`: resultado por tentativa, histórico original, score, posição,
+  polaridade, erros, extremos ADC e hashes de dados.
+- `summary.json`: contagens originais/derivadas, BER condicional ao alinhamento,
+  falhas, recuperações e grupos de duplicações exatas.
+- `manifest.json`: checksum do ZIP/membros/derivados, versão e hashes do código,
+  ambiente, limiar, timestamps e estado da execução. Usar apenas saída com
+  `state="complete"`; uma falha deixa sua pasta e manifesto para inspeção.
+
+O reprocessador não extrai caminhos do ZIP, rejeita caminhos inseguros, symlinks,
+IDs duplicados (inclusive aliases por maiúsculas/minúsculas), sessões entre splits
+e contratos inválidos antes de criar a saída. Há limites de 32 MiB por membro e
+256 MiB somados no ZIP, e o conteúdo validado é mantido em RAM; não é um loader
+streaming. Use fontes confiáveis e dados numéricos MATLAB `-v7`, não objetos/HDF5.
+
+**Limite desta versão:** exige taxas TX/RX iguais e TX Manchester compatível com
+bits/sps declarados. Recusa taxas diferentes em vez de substituir a reamostragem
+MATLAB por uma aproximação não validada. Falhas originais sem sinal disponível
+permanecem indisponíveis; BER dessas tentativas é desconhecida, não zero.
+
+O campo `source_record` conserva status/erro, alinhamento e dados de sincronização
+originais quando presentes. Os campos de tempo originais, inclusive `total_seconds`
+e `sync_seconds`, permanecem **tempos da tentativa original**, não de uma execução
+física com o método novo. `reprocess_seconds` e `reprocess_sync_seconds` medem só
+processamento offline, sem escrita em disco. Não os confundir com latência do enlace.
+
+Resultado no piloto: 99 sucessos/1 falha originais, 100 alinhamentos derivados,
+zero erros em 40.000 bits, captura 0042 recuperada; todos ainda na mesma sessão
+e split `train`. Isso não permite treino/validação/teste independentes. Ainda
+não houve treinamento de CNN com esse dataset real. As varreduras AWGN descritas
+abaixo já foram executadas.
+
+### AWGN exploratório sobre capturas reais — já executado
+
+O ambiente CPU usado está em `.venv/` nesta máquina. Para reproduzir em ambiente
+novo, crie a venv sem sobrescrever outra existente e instale as faixas de
+`requirements.txt` ou o snapshot Linux/Python 3.13 de `requirements-cpu.lock.txt`.
+Com UV, o lock usa dois índices oficiais e requer resolução por versão:
+
+```bash
+uv pip install --python .venv/bin/python --index-strategy unsafe-best-match -r requirements-cpu.lock.txt
+```
+
+Comandos a partir desta pasta; escolha uma saída **nova** se já existir:
+
+```bash
+.venv/bin/python awgn_sweep.py \
+  --data data/baseline_20261015_175101_sync_v1_audited \
+  --out runs/awgn_pilot_refined_seed42 \
+  --ratios-db -10 -8 -6 -4 -2 0 2 4 5 6 8 10 --realizations 30 --seed 42
+
+.venv/bin/python awgn_sweep.py \
+  --data data/baseline_20261015_175101_sync_v1_audited \
+  --out runs/awgn_pilot_pre_sync_transition_seed42 \
+  --ratios-db -5 -4 -3 -2 0 2 5 --realizations 10 --seed 42 \
+  --point pre-synchronization
+```
+
+O ponto padrão é `post-alignment`, com posição/polaridade fixas da captura
+original: não há nova normalização ou sincronização após o ruído. No modo
+`pre-synchronization`, soma-se ruído ao registro bruto **já digitalizado**, depois
+normaliza-se e reexecuta-se a busca assistida com o limiar original. Ambos são
+experimentos numéricos sem clipping/requantização, não injeção física de ruído.
+
+O eixo é `10 log10(P_AC_captura / sigma²_adicionado)`, não SNR física total nem
+Eb/N0. O gerador usa variância esperada, sem forçar média zero/RMS exato em cada
+realização, e registra seeds derivadas de identidade/versão/checksum/nível/realização.
+Não há arquivos `.mat` novos por ruído: os sinais são regeneráveis pelas receitas
+e hashes em `frames.csv`, com as fontes originais intactas.
+
+Cada run contém `frames.csv`, `curves.csv`, `summary.json`, gráficos PNG/SVG,
+manifesto e snapshots do código em `code/`. O manifesto verifica as entradas
+antes/depois e registra hashes das saídas. Diretórios incompletos permanecem para
+auditoria e nunca são sobrescritos. O código guarda só falhas de sincronismo
+como indisponibilidade; BER é desconhecida se nenhuma tentativa for aceita.
+
+O integrador pós-alinhamento também é comparado com a probabilidade exata de erro
+**condicional à waveform capturada e ao AWGN adicionado**. Isso verifica o simulador;
+não é medição da BER física, nem fornece TX como feature ao detector. A previsão
+não é aplicada ao caso de realinhamento/seleção de cópias sob ruído.
+
+Resultados selecionados, seed 42: BER 0,003695 em 0 dB e 0,0005175 em 2 dB; em
+5 dB houve oito erros em 1.200.000 decisões. São 30 realizações dos mesmos 40.000
+bits físicos, não 1.200.000 bits novos de bancada. No caso pré-sincronização,
+apenas 151/1.000 tentativas passaram em −4 dB e 0/1.000 em −5 dB, com limiar 0,5
+ainda não calibrado. Ver o relatório para contexto, réplica com outra seed e limites.
+
+Os agregados versionáveis estão em `reports/awgn_pilot_20261018/`. Para exportar
+outra execução completa, sem copiar os CSVs por realização ou dados brutos:
+
+```bash
+.venv/bin/python export_results.py --source runs/NOVA_EXECUCAO --out reports/NOVO_RESUMO
+```
+
+### Benchmark neural/classical — pronto para novas sessões, não para este piloto
+
+`benchmark_detectors.py` aceita várias raízes auditadas de `reprocess_captures.py`.
+Exige treino/validação/teste em sessões distintas e rejeita origem, RX bruto ou
+payload idênticos cruzando splits. Não cria splits artificialmente e não altera
+metadados para contornar a ausência de validação. O piloto real foi recusado
+corretamente; o fluxo completo foi testado somente com sessões sintéticas.
+
+Exemplo **somente após obter a campanha independente**, não executado no piloto:
+
+```bash
+.venv/bin/python benchmark_detectors.py \
+  --data data/SESSAO_TREINO_AUDITADA data/SESSAO_VALIDACAO_AUDITADA data/SESSAO_TESTE_AUDITADA \
+  --out runs/comparacao_seed42 --seed 42 --epochs 20 --realizations 20 \
+  --augmentation-ratios-db -10 -5 0 5 10
+```
+
+Rode também sem `--augmentation-ratios-db` em outra pasta, mantendo seeds/níveis
+de avaliação iguais. Repita seeds de modelo predefinidas e reporte todas, sem
+escolher a melhor no teste. Normalização e template vêm só do treino; regularização
+ridge e época da CNN são escolhidas em validação. Ridge/CNN recebem as mesmas
+waveforms aumentadas, contexto e escala; o template usa médias de classe do treino
+sem ruído adicional, não é FIR/MMSE/DFE completo.
+
+O teste recebe exatamente as mesmas realizações para todos os métodos. Erros e
+tempo do detector são separados da construção de features; nenhum desses tempos
+representa latência física fim a fim. O bootstrap compara diferenças pareadas de
+BER média por sessão, sem intervalo se houver menos de duas sessões; poucas sessões
+continuam frágeis. A guarda mínima de um grupo por split não garante suficiência
+estatística: siga `CAMPANHA_BANCADA.md` e amplie sessões conforme o protocolo.
+
+O pipeline original abaixo continua útil para smoke tests ou datasets já
+particionados corretamente, mas não deve ser usado para fabricar validação/teste
+a partir deste piloto de uma sessão:
 
 ```bash
 python pipeline.py train --data data/pilot --out runs/pilot_seed42 --context 2 --epochs 20 --seed 42

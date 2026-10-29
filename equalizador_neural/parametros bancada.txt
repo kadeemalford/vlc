@@ -1,0 +1,3 @@
+parametros bancada:
+- fonte: 18V, 200ma (canal 1 e 2)
+- 
