@@ -6,6 +6,13 @@ O objetivo principal deste repositório é **selecionar, implementar e avaliar u
 
 As propostas abaixo foram revistas considerando os scripts MATLAB, e não apenas seu README. Nenhuma apresenta ganho de ML já comprovado: a escolha deve depender de um piloto que avalie dados, limitações do baseline e viabilidade experimental.
 
+**Atualização em 02/11/2026:** foram formalizadas as propostas **4 — equalização
+em regime limitado por banda** e **5 — compressão/reconstrução robusta de imagens**,
+retirando a dependência da fonte médica nessas duas alternativas. A proposta 2,
+seu código e seus resultados de AWGN permanecem preservados, não substituídos.
+A prioridade inicial passa à caracterização da proposta 4, com software separado
+em `equalizador_neural_2/`; não há nova validação física ou ganho neural demonstrado.
+
 ### Aplicação e bancada
 
 O sistema recebe dados de equipamentos médicos por TCP, incluindo mensagens HL7 de observação (`ORU`) e tráfego binário de bombas de infusão. Um parser extrai variáveis e alarmes reconhecidos e os converte em mensagens compactas legadas. Essas mensagens entram em uma FIFO e são agrupadas em quadros de até 58 caracteres.
@@ -51,6 +58,10 @@ Fonte → parser → codec/framing → Manchester → AFG/LED → canal → PD �
 ```
 
 ## Resumo comparativo
+
+As três linhas originais estão resumidas abaixo. As propostas 4 e 5, formalizadas
+em 02/11/2026, têm comparação própria na seção de decisão ao final; a proposta 4
+é a prioridade inicial atual, sem invalidar o trabalho já realizado na proposta 2.
 
 | Critério | 1. Compressão temporal aprendida | 2. Equalização/detecção neural | 3. Controle adaptativo contextual |
 | --- | --- | --- | --- |
@@ -229,16 +240,168 @@ Não usar o Q igual a zero do fluxo atual como medição. Também não equiparar
 
 **Potencial científico:** controle contextual fechado no enlace experimental pode ser relevante, mas o cenário precisa exigir adaptação. Se uma amplitude fixa segura resolver todas as condições, ML não se justifica. Esta linha é secundária até existir caracterização diversificada e feedback confiável. RL acrescenta risco e complexidade sem garantia de contribuição e não é recomendado como ponto de partida.
 
+## 4. Equalização neural para ampliar a taxa útil de VLC limitado em banda
+
+### Motivação, escopo e pergunta
+
+Substituir os aparelhos médicos por bits aleatórios gerados no PC e explorar taxas
+de transmissão crescentes no enlace óptico existente. Uma imagem pode demonstrar
+a aplicação posteriormente, mas não é necessária para treinar um equalizador.
+Transmitir um arquivo maior na mesma taxa/modulação aumenta duração, não a banda
+ocupada automaticamente. A baixa demanda da telemetria permite uma taxa conservadora;
+o piloto não estabeleceu causalmente que a simplicidade dos códigos explica a BER
+baixa, pois também usou bits aleatórios a 1 Mbps sem erros observados em 40.000 bits.
+
+**Pergunta:** sob os mesmos limites físicos e orçamento de informação, uma rede
+compacta permite maior taxa útil para uma meta de erro que equalizadores clássicos,
+generalizando entre sessões e mantendo custo de processamento aceitável?
+
+```text
+PC: bits aleatórios → Manchester em taxa selecionada → AFG/amplificador/Bias-Tee/LED
+  → canal óptico → Hyperion → aquisição → sincronização comum
+  → integrador / referência linear / DFE / CNN → bits e contagens de erro
+```
+
+O aumento da taxa pode evidenciar limitação de banda e ISI; não linearidade com
+memória também pode ser relevante, mas precisa ser medida. Não atribuir toda
+degradação ao LED: AFG, amplificador, receptor, aquisição e relógios também limitam
+o sistema. A banda aproximada de 2 MHz da bancada correlata não é uma medição
+do setup atual CXA1507/Hyperion. Saturação severa pode destruir informação.
+
+### Implementação inicial e referências
+
+Começar com portadora única e Manchester-OOK para reaproveitar o legado. NRZ-OOK,
+PAM e OFDM óptico são extensões condicionais, não requisitos. OFDM exige escolha
+compatível com IM/DD, pilotos, CP, tratamento de bias/clipping/PAPR e referências
+próprias; não basta enviar amostras complexas diretamente ao LED.
+
+O protótipo em `equalizador_neural_2/` reutiliza explicitamente módulos da proposta
+2 sem modificá-los: leitura auditável, sincronização e detector CNN. Acrescenta
+coleta por blocos de taxa, preparação/diagnóstico multitaxa e DFE clássico. Os
+modelos são ajustados **separadamente por taxa**, sem AWGN adicional por padrão.
+O ridge contextual é uma referência linear fracionariamente espaçada com decisão
+binária, não uma prova de equivalência a toda forma de FFE/MMSE. O DFE usa bits
+conhecidos apenas no treino, decisões recursivas em validação/teste e reinício por
+quadro. Todos mantêm sincronização `assisted_full_tx`; não são receptores independentes.
+
+Comparar integrador, template do pulso, referência linear com memória, DFE e CNN.
+Adicionar Volterra/modelo não linear clássico se a caracterização o justificar.
+Um detector neural de bits é uma forma de equalização/detecção conjunta, não uma
+rede de reconstrução de waveform. Memória, lookahead, dados, ajuste, orçamento de
+pilotos e custo devem ser explicitados; não comparar condições desiguais.
+
+### Plano experimental e portões de decisão
+
+1. Registrar limites seguros e configuração completa, sem mudar corrente/amplitude
+   automaticamente. Validar o quadro de referência a 1 Mbps e as taxas reais.
+2. Caracterizar resposta temporal/espectral e realizar varredura presencial de taxa.
+   Coordenar TX, amostragem, janela e trigger; rejeitar inconsistências em vez de
+   atribuir aliasing/falhas de aquisição ao canal. Taxas maiores dependem dos limites
+   verificados do instrumento e da cadeia, não de uma lista autorizada pelo software.
+3. Identificar região com distorção recuperável. Se apenas o sincronismo assistido
+   falha, investigar enquadramento/estimação antes de concluir que a equalização falhou.
+4. Testar referências clássicas. Necessidade de equalização **não implica** necessidade
+   de rede neural. Se os clássicos resolverem, não forçar uma contribuição de ML.
+5. Coletar sessões independentes e congelar escolhas em treino/validação. Não usar
+   janelas/ruídos/repetições da mesma origem como sessões novas; preservar todas as falhas.
+6. Comparar modelos, várias seeds predefinidas, BER/FER, disponibilidade e complexidade.
+   Separar generalização entre sessões de generalização entre taxas; esta última
+   não é demonstrada ao treinar um modelo diferente em cada taxa.
+7. Somente depois medir taxa útil completa com preâmbulo, CRC/FEC e overhead definidos.
+   Repetição do AFG e taxa nominal não equivalem a throughput de arquivos nem streaming.
+
+**Sucesso:** superar a melhor referência clássica no compromisso taxa/erro/custo,
+com contagens, comparação pareada e incerteza por sessão; nenhuma garantia prévia
+de aumento de taxa. A meta de BER e os critérios de qualidade devem ser fixados
+antes do teste, conforme a aplicação e a codificação realmente utilizadas.
+
+**Defensabilidade:** maior clareza de atribuição de ganho que uma cadeia fonte-canal
+inteira, pois o receptor pode ser trocado mantendo as mesmas capturas. A novidade
+não está em usar CNN: procurar uma limitação demonstrada em generalização, adaptação,
+não linearidade ou complexidade. O PDF de Costa et al. serve como inspiração de
+equalização direta; seus ganhos simulados contra LS não se transferem à bancada.
+
+**Dificuldade:** média mantendo portadora única; alta ao iniciar com OFDM. A incerteza
+principal é física e científica: existir região recuperável com margem sobre o
+clássico. A caracterização permite investigar isso antes de investir em modelos grandes.
+
+## 5. Compressão aprendida e reconstrução robusta de imagens por VLC
+
+### Ideia, pergunta e limites
+
+Substituir a telemetria compacta por imagens estáticas públicas, com redundância
+espacial e critérios explícitos de distorção. Atuar na representação da fonte e
+na tolerância a erros/perdas, não confundir essa função com equalização do canal.
+
+**Pergunta:** para o mesmo orçamento total de transmissão, uma representação
+aprendida e quantizada entrega melhor qualidade ou menor indisponibilidade do
+que compressão convencional com proteção apropriada em um enlace VLC medido?
+
+```text
+Imagem → encoder aprendido → quantização → índices/bits → quadros → VLC
+       → bits/perdas observados → decoder → imagem reconstruída
+```
+
+Não é necessário operar em taxas muito altas: reduzir recursos/tempo para entregar
+uma imagem pode ser útil em um enlace lento. Porém, o ciclo atual de upload/aquisição
+tem overhead elevado; demonstrar transferência em blocos não comprova vídeo ou
+operação em tempo real. O hardware WDM/FPGA e os ganhos do PDF de Chen et al. não
+descrevem o setup disponível e não autorizam alegações de 1 Gbps ou cobertura duplicada.
+
+### Implementação e avaliação propostas — ainda não implementadas
+
+1. Começar por imagens estáticas e um autoencoder quantizado/VQ-VAE controlável,
+   eventualmente pré-treinado com licença e origem documentadas. Não iniciar por
+   vídeo, imagens médicas ou GAN grande. Redes generativas podem inventar detalhes;
+   aparência plausível não implica fidelidade, especialmente em aplicações críticas.
+2. Medir primeiro qualidade versus bits sem erros para separar ganho de compressão.
+   Serializar de fato os índices/latentes; não contar tensores contínuos como um
+   bitstream transmitido. Contabilizar cabeçalhos, parâmetros auxiliares e codebook.
+3. Implementar packetização, CRC, perdas e política de recuperação. Se o receptor
+   descarta quadros inválidos, avaliar erasures reais, não supor acesso a bits corrompidos.
+4. Incorporar padrões de erro/perda medidos no VLC ao treino ou proteção da representação.
+   Índices VQ vizinhos em bits não são necessariamente semanticamente próximos;
+   robustez depende do mapeamento/treino/proteção, não surge apenas com quantização.
+5. Comparar JPEG e codecs modernos disponíveis (WebP/AVIF/BPG), incluindo proteção
+   FEC/intercalação adequada e a mesma política de retransmissão. Comparar orçamentos
+   totais de bits/usos do canal/tempo, não só bytes do arquivo comprimido.
+6. Avaliar PSNR, SSIM/MS-SSIM, LPIPS, falhas completas, tempo e custo computacional,
+   preservando métricas complementares mesmo quando discordam. Não chamar diferenças
+   entre pixels reconstruídos de BER do enlace: compressão com perdas já altera pixels.
+7. Separar imagens/cenas de treino/validação/teste e também sessões do canal. Distinguir
+   generalização de conteúdo, compressão sem erro, robustez ao canal e efeito conjunto.
+
+**Sucesso:** melhor compromisso qualidade/recursos/robustez frente a referências
+fortes, incluindo toda proteção e overhead. Definir previamente se o objetivo é
+fidelidade, percepção ou preservação de tarefa; “baixa perda” sem métrica não basta.
+Compressão aprendida não precisa receber o nome “semântica”; se houver uma tarefa,
+avaliá-la explicitamente. Não há superação dos limites de Shannon: há tolerância
+a distorção e exploração de conhecimento prévio, com custos próprios.
+
+**Defensabilidade:** exige que características do enlace medido influenciem a
+representação, proteção ou reconstrução; enviar bytes de um compressor neural por
+VLC é uma demonstração funcional insuficiente isoladamente. A comparação precisa
+separar ganhos do codec, da proteção e do processamento físico.
+
+**Dificuldade:** um demo com pesos prontos pode ser simples, mas uma contribuição
+com codec robusto, baselines justos e transmissão completa é alta. Riscos: clássico
+com FEC igualar a rede, ganho depender apenas de LPIPS, domínio estreito e custo
+computacional/latência anular economia de transmissão. Não há código desta proposta
+na pasta `equalizador_neural_2/`; essa pasta implementa somente a proposta 4.
+
 ## Recomendação de trajetória e decisão
 
 ### Prioridade com a bancada disponível
 
-**Priorizar a proposta 2 como hipótese de trabalho, não como resultado garantido.** Ela atua diretamente no enlace, aproveita pares TX/RX já retornados pelo MATLAB, permite rótulos automáticos e não requer alteração expressiva de hardware para ensaios em ar.
+**Priorizar inicialmente a caracterização da proposta 4**, mantendo a proposta 2
+como linha preservada e infraestrutura reutilizável. A proposta 5 é uma alternativa
+independente, não uma etapa obrigatória do equalizador nem um projeto a combinar
+imediatamente com ele. Nenhuma contribuição de ML está garantida.
 
-1. Consolidar uma coleta mínima reprodutível, com metadados e falhas, e medir o ciclo real de transmissão/aquisição.
-2. Diante da BER nominal muito baixa, preservar capturas reais sem ruído adicional e comparar integrador, referências clássicas adequadas ao canal e rede sob AWGN numérico controlado, declarando o caráter híbrido experimental-numérico.
-3. Definir sincronização assistida ou por preâmbulo e manter igualdade de informação entre métodos.
-4. Testar uma rede pequena em condições reservadas. Só ampliar coleta/modelo após encontrar ganho específico de ML.
+1. Validar software offline e plano de sessão; documentar limites e conferir bancada presencialmente.
+2. Fazer caracterização/varredura de taxa sem ruído adicional, com aquisição coerente.
+3. Identificar distorção recuperável e limitações das referências clássicas antes de escolher foco neural.
+4. Coletar sessões independentes e avaliar rede pequena sem confundir taxa nominal, goodput e latência.
 
 A proposta 1 pode avançar em paralelo como análise de compressibilidade, sem treinar DL de imediato. A proposta 3 pode reaproveitar a campanha física, mas só deve tornar-se foco se houver mudança de canal e vantagem sobre regras simples.
 
@@ -248,17 +411,29 @@ A proposta 1 pode avançar em paralelo como análise de compressibilidade, sem t
 | --- | --- |
 | Predição clássica comprime tanto quanto ML | Não insistir na proposta 1 como artigo de ML; ampliar diversidade apenas se houver hipótese fundamentada. |
 | Equalização clássica iguala a rede | Não atribuir ganho ao ML; investigar condições físicas relevantes ou encerrar a hipótese. |
-| Enlace nominal não apresenta erros na campanha | Não alegar redução da BER nominal; avaliar robustez sob AWGN controlado sobre capturas reais, sem tratar o ruído numérico como injeção física ou garantia de ganho de ML. |
+| Enlace nominal não apresenta erros na campanha | Não alegar redução da BER nominal; na proposta 2, AWGN numérico permanece ensaio separado. Na proposta 4, caracterizar taxas maiores com aquisição coerente e limites autorizados, sem garantia de margem neural. |
 | Ponto fixo/heurística resolve a adaptação | Não iniciar RL para criar complexidade artificial; reconsiderar a proposta 3. |
 | Bancada indisponível | Fazer parsers, codecs e protótipos em simulação, delimitando resultados; não apresentar validação experimental inexistente. |
 
-### É necessário propor uma quarta linha agora?
+### Decisão atual entre as novas linhas
 
-Não há evidência suficiente para concluir que todas as propostas atuais são inviáveis. A equalização/detecção neural, reformulada com comparação clássica forte e sincronização explicitada, permanece uma hipótese verificável com mudanças predominantemente de software. Portanto, **não se acrescenta uma alternativa apenas para substituir uma contribuição ainda não testada por outra igualmente não comprovada**.
+| Critério | 4. Equalização limitada por banda | 5. Compressão/reconstrução de imagens |
+| --- | --- | --- |
+| Reaproveitamento | Alto: coleta, auditoria e detectores | Parcial: infraestrutura do enlace |
+| Esforço inicial | Médio em portadora única | Demo médio; estudo completo alto |
+| Gargalo inicial | Caracterização física e margem sobre clássico | Codec, proteção, packetização e avaliação justa |
+| Clareza de atribuição | Maior: mesmos RX, receptores distintos | Menor: vários componentes interagem |
+| Risco científico | Clássico resolver a distorção | Codec clássico protegido igualar ganho; métrica perceptual ocultar perda |
+| Primeiro portão | Existe distorção recuperável relevante? | Existe ganho qualidade/recursos sem erros e depois sob canal? |
+
+Escolher 4 primeiro se o objetivo for continuidade do trabalho e comparação
+experimental controlável. Escolher 5 se o interesse central for representação de
+imagens, houver tempo/recursos para o codec e objetivo claro de qualidade/recursos.
+Não tratar a aparência mais atraente da demonstração como evidência de novidade.
 
 Uma reformulação útil dentro da proposta 2 é focar um **receptor independente de payload e robusto entre sessões**, combinando preâmbulo conhecido, equalização/detecção e avaliação de falhas. O preâmbulo é infraestrutura de baseline; a contribuição de ML ainda precisa vir de desempenho ou generalização superiores. Essa formulação é mais defensável que alegar um receptor fim a fim enquanto ele conhece toda a mensagem TX.
 
-Correções de parser, CRC, sequência, coleta e sincronização podem ser essenciais à qualidade do trabalho, mas não são, isoladamente, contribuição de ML. O primeiro artigo deve ter um foco principal e ablações que separem infraestrutura, processamento clássico e aprendizado. Combinar as três linhas no primeiro trabalho tende a diluir a pergunta e multiplicar requisitos de dados.
+Correções de parser, CRC, sequência, coleta e sincronização podem ser essenciais à qualidade do trabalho, mas não são, isoladamente, contribuição de ML. O primeiro artigo deve ter um foco principal e ablações que separem infraestrutura, processamento clássico e aprendizado. Combinar várias linhas no primeiro trabalho tende a diluir a pergunta e multiplicar requisitos de dados.
 
 ## Referências e seu papel
 
@@ -267,6 +442,7 @@ Correções de parser, CRC, sequência, coleta e sincronização podem ser essen
 - **van der Zwaag (2020), `Dissertation_Klaas.pdf`:** contexto de VLC em ambientes de terapia intensiva e limitações do enlace.
 - **van der Zwaag et al. (2021), “A Manchester-OOK visible light communication system for patient monitoring in intensive care units”, IEEE Access:** referência da aplicação clínica Manchester-OOK.
 - **Chen et al. (2024), “Semantic-empowered visible light communication for image transmission based on deep convolutional generative adversarial network”, Optics Express, `vq-gan_vlc.pdf`:** comunicação semântica/VQ para imagens; seus ganhos não podem ser transferidos diretamente para telemetria compactada.
+- **Costa et al. (2019), “Direct Equalization with Convolutional Neural Networks in OFDM based VLC Systems”, `Direct_Equalization_with_Convolutional_Neural_Networks_in_OFDM_based_VLC_Systems.pdf`:** equalização direta em simulação; vantagem em condições específicas contra LS, não superioridade universal ou validação do setup atual.
 - **Ulkar et al. (2020), “VLCnet: Deep learning based end-to-end visible light communication system”, Journal of Lightwave Technology:** referência de DL para comunicação VLC.
 - **Shi et al. (2023), “Optimal adaptive waveform design utilizing an end-to-end learning-based pre-equalization neural network in an UVLC system”, Journal of Lightwave Technology:** referência de adaptação/pré-equalização aprendida.
 - **Camporez (2025), “AI-Based Strategies for Handover Enhancement in Visible Light Communication Systems”:** tese citada no relatório FINEP, contextualizando decisões adaptativas.
