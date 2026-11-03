@@ -64,6 +64,26 @@ pode fechar conexões VISA: não a repetir enquanto outra rotina usa o instrumen
 No workspace pausado legado o objeto era `txRxAnalyzer`, não necessariamente está
 disponível no workspace base. Não usar `dbcont` para iniciar TCP/UI inadvertidamente.
 
+Se a conexão já foi aberta manualmente como `scopeVisa`, usar o adaptador novo
+sem executar a inicialização legada:
+
+```matlab
+txRxAnalyzer = ExistingVisaMdo3012Analyzer(scopeVisa);
+assert(str2double(txRxAnalyzer.queryText('AFG:OUTPut:STATE?')) == 0, ...
+    'Keep AFG output OFF during the transfer check');
+rxProbe = txRxAnalyzer.readSamples(1);
+fprintf('Points: %d; sample rate: %.0f Sa/s\n', ...
+    numel(rxProbe.getSamples()), rxProbe.getSampleRate());
+fprintf('AFG output after read: %s\n', ...
+    txRxAnalyzer.queryText('AFG:OUTPut:STATE?'));
+```
+
+Essa leitura configura apenas a transferência de CH1 e limpa a fila de eventos
+SCPI, como o leitor legado; não liga saída nem altera amplitude, timebase ou ganho.
+O sinal com AFG OFF não é uma captura de comunicação nem será usado para BER.
+O adaptador toma emprestada a conexão: não abrir outro VISA para o mesmo dispositivo,
+nem fechar `scopeVisa` durante seu uso. O chamador continua responsável por fechá-la.
+
 1. Conferir alimentação e polarização, ganho, distância/alinhamento, amplitude,
    trigger, acoplamento, escala vertical e ausência de clipping.
 2. No instrumento, ajustar manualmente comprimento de registro e base de tempo

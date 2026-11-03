@@ -32,6 +32,24 @@
   `*.local.json` continuam ignoradas. A repetição no MATLAB ainda está pendente.
 - Nenhuma nova captura foi relatada neste retorno; conexão VISA ainda não confirmada.
 
+### Conexão e plano do primeiro piloto — 03/11/2026
+
+- Usuário confirmou conexão NI-VISA com MDO3012 C024549, firmware v1.20:
+  AFG OFF, CH1, 10.000 pontos, intervalo 100 ns, AC e 500 mV/div.
+  Aquisição ativa, STOPAfter RUNSTOP, trigger AUTO/EDGE/CH1/RISE/100 mV.
+- Os três testes de validação MATLAB passaram após a correção.
+- JSON `bench_20261103_161327.local.json` revisado a partir do arquivo recebido
+  em Downloads: 1 Mbps, 20 quadros de 400 bits, distância aproximada de 2,1 m;
+  receptor assumido Hyperion conforme tese, ganho não documentado.
+- Fonte relatada: CH1 18 V/0,194 A em CV, CH2 17,38 V/0,199 A em CC, em série.
+  Metadado de corrente usa indicação CH2 com ressalva explícita, não medição
+  independente do LED. AFG relatado Arbitrary/Hi-Z/1 Vpp/offset zero;
+  CH1 com limite de banda de 20 MHz. Não foi autorizada mudança elétrica.
+- Adicionado `ExistingVisaMdo3012Analyzer`: toma emprestada a sessão VISA aberta,
+  sem configuração no construtor; reutiliza upload legado e implementa leitura
+  binária sem fallback de taxa. Não modifica fontes da proposta 2.
+  **Adaptador ainda não executado no MATLAB**; próximo portão é leitura com AFG OFF.
+
 No PC da bancada, seguir `BANCADA.md`: preparar ambiente e testar validadores sem
 instrumentos, preencher metadados reais e obter autorização local; depois coletar
 um bloco de referência a 1 Mbps. Validar aquisição e diagnóstico antes de aumentar

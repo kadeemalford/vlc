@@ -25,7 +25,7 @@ codeDir = fullfile(plan.rate_dir, 'code');
 mkdir(codeDir);
 for name = {'collect_rate_block', 'validate_rate_plan', 'collect_capture', ...
         'synchronize_capture_samples', 'ManchesterOokParameters', ...
-        'ManchesterOokEncoder', 'Mdo3012Analyzer', 'SignalUtils'}
+        'ManchesterOokEncoder', 'Mdo3012Analyzer', 'ExistingVisaMdo3012Analyzer', 'SignalUtils'}
     sourceFile = which(name{1});
     assert(~isempty(sourceFile), 'Cannot snapshot source: %s', name{1});
     copyfile(sourceFile, fullfile(codeDir, [name{1} '.m']));
