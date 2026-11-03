@@ -3,3 +3,4 @@ runs/
 .venv/
 __pycache__/
 matlab/*.local.json
+!matlab/session.example.json

@@ -7,7 +7,8 @@ required = {'session_id', 'split', 'condition_id', 'seed', 'rates_bps', ...
 for k = 1:numel(required)
     assert(isfield(plan, required{k}), 'Missing field: %s', required{k});
 end
-assert(~contains(fileread(configFile), 'REPLACE'), 'Fill all REPLACE placeholders first');
+assert(~contains(fileread(configFile), 'REPLACE'), ...
+    'VLC:RatePlan:UnfilledTemplate', 'Fill all REPLACE placeholders first');
 assert(any(strcmp(plan.split, {'train', 'val', 'test'})), 'Invalid split');
 assert(~isempty(regexp(plan.session_id, '^[A-Za-z0-9_-]+$', 'once')), 'Unsafe session ID');
 assert(~isempty(plan.condition_id) && ~isempty(plan.out_dir), 'Empty condition/output');
@@ -20,7 +21,8 @@ validateattributes(plan.bits_per_frame, {'numeric'}, {'scalar', 'integer', '>=',
 validateattributes(plan.channel, {'numeric'}, {'scalar', 'integer', '>=', 1, '<=', 2});
 validateattributes(plan.record_points, {'numeric'}, {'scalar', 'integer', 'positive'});
 validateattributes(plan.sync_threshold, {'numeric'}, {'scalar', '>', 0, '<=', 1, 'finite'});
-assert(plan.record_points >= 2*plan.bits_per_frame*10, 'Record must cover at least two frame durations');
+assert(plan.record_points >= 2*plan.bits_per_frame*10, ...
+    'VLC:RatePlan:ShortRecord', 'Record must cover at least two frame durations');
 numericFields = {'afg_vpp', 'bias_current_a', 'distance_m', 'vertical_scale_v_div'};
 for k = 1:numel(numericFields)
     name = numericFields{k};

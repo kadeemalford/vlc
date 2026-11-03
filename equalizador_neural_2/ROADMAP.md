@@ -21,6 +21,17 @@
 
 ## Próxima ação concreta
 
+### Primeiro retorno do MATLAB da bancada — 03/11/2026
+
+- `testValidPlan` passou. `testShortRecord` rejeitou corretamente o registro curto,
+  mas o teste falhou por esperar um identificador de erro não retornado pelo MATLAB.
+- `testUnfilledTemplate` encontrou arquivo ausente: o `.gitignore` da raiz ignora
+  `*.json`, incluindo inadvertidamente `matlab/session.example.json`.
+- Corrigidos os dois testes com identificadores explícitos `VLC:RatePlan:*` e
+  adicionada exceção no `.gitignore` local para versionar o template. Configurações
+  `*.local.json` continuam ignoradas. A repetição no MATLAB ainda está pendente.
+- Nenhuma nova captura foi relatada neste retorno; conexão VISA ainda não confirmada.
+
 No PC da bancada, seguir `BANCADA.md`: preparar ambiente e testar validadores sem
 instrumentos, preencher metadados reais e obter autorização local; depois coletar
 um bloco de referência a 1 Mbps. Validar aquisição e diagnóstico antes de aumentar

@@ -1,0 +1,23 @@
+{
+  "session_id": "REPLACE_DAY_SETUP_SESSION",
+  "split": "train",
+  "condition_id": "REPLACE_FIXED_PHYSICAL_CONDITION",
+  "seed": 12001,
+  "rates_bps": [1000000],
+  "frames_per_rate": 20,
+  "bits_per_frame": 400,
+  "channel": 1,
+  "sync_threshold": 0.5,
+  "record_points": 10000,
+  "out_dir": "REPLACE_ABSOLUTE_NEW_CAPTURE_DIRECTORY",
+  "physical_metadata": {
+    "receiver": "REPLACE_MODEL_AND_GAIN",
+    "afg_vpp": null,
+    "bias_current_a": null,
+    "distance_m": null,
+    "vertical_scale_v_div": null,
+    "trigger_note": "REPLACE_SOURCE_EDGE_LEVEL_MODE",
+    "illumination_note": "REPLACE_OBSERVED_CONDITIONS",
+    "operator_note": "Characterization pilot; not independent training evidence"
+  }
+}

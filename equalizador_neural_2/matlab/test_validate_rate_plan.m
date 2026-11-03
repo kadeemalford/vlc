@@ -11,7 +11,7 @@ end
 
 function testUnfilledTemplate(testCase)
 file = fullfile(fileparts(mfilename('fullpath')), 'session.example.json');
-verifyError(testCase, @() validate_rate_plan(file, 1), 'MATLAB:assertion:failed');
+verifyError(testCase, @() validate_rate_plan(file, 1), 'VLC:RatePlan:UnfilledTemplate');
 end
 
 function testShortRecord(testCase)
@@ -19,7 +19,7 @@ function testShortRecord(testCase)
 plan = jsondecode(fileread(file));
 plan.record_points = 1000;
 fid = fopen(file, 'w'); fprintf(fid, '%s', jsonencode(plan)); fclose(fid);
-verifyError(testCase, @() validate_rate_plan(file, 1), 'MATLAB:assertion:failed');
+verifyError(testCase, @() validate_rate_plan(file, 1), 'VLC:RatePlan:ShortRecord');
 end
 
 function [file, cleanup] = fixture()
