@@ -50,6 +50,18 @@
   binária sem fallback de taxa. Não modifica fontes da proposta 2.
   **Adaptador ainda não executado no MATLAB**; próximo portão é leitura com AFG OFF.
 
+### Retorno da leitura e primeiro bloco alimentado
+
+- Usuário confirmou leitura do adaptador: 10.000 pontos, 10 MS/s e AFG OFF.
+  Também confirmou upload preparatório com período de 400 µs e saída OFF.
+- Houve tentativa sem alimentação, a preservar separadamente. Depois foi criado
+  out_dir com sufixo `_powered`, mantendo o session_id físico.
+- Recebido e analisado ZIP da tentativa alimentada: 20/20 rejeições de correlação;
+  RX pequeno, sem rails ADC, sem correspondência forte a qualquer TX do bloco.
+  Fontes MATLAB do ZIP conferidas contra as locais, normalizando quebras de linha.
+- Detalhes/hashes em `reports/bench_20261103_161327_powered.md`.
+  Próxima ação: diagnóstico do caminho físico/AFG, não aumento de taxa nem treino.
+
 No PC da bancada, seguir `BANCADA.md`: preparar ambiente e testar validadores sem
 instrumentos, preencher metadados reais e obter autorização local; depois coletar
 um bloco de referência a 1 Mbps. Validar aquisição e diagnóstico antes de aumentar

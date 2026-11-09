@@ -13,6 +13,17 @@ seu código e seus resultados de AWGN permanecem preservados, não substituídos
 A prioridade inicial passa à caracterização da proposta 4, com software separado
 em `equalizador_neural_2/`; não há nova validação física ou ganho neural demonstrado.
 
+**Redirecionamento em 09/11/2026 — vigente:** por decisão com o orientador,
+suspender a equalização como foco e priorizar a **proposta 6: codificação e
+reconstrução neural experimental de telemetria médica por VLC**. Compressão
+expressiva, superioridade sobre codecs clássicos e estudo de interceptadores não
+são objetivos da primeira etapa. A motivação inclui uma futura investigação de
+confidencialidade/“criptografia neural”, mas o experimento inicial **não demonstra
+segurança criptográfica**. Reintroduzir os equipamentos médicos como fonte,
+mantendo a bancada óptica existente. Código novo em `codificacao_neural/`;
+propostas anteriores, equalizadores e capturas ficam preservados. As prioridades
+anteriores neste documento são históricas quando conflitarem com esta atualização.
+
 ### Aplicação e bancada
 
 O sistema recebe dados de equipamentos médicos por TCP, incluindo mensagens HL7 de observação (`ORU`) e tráfego binário de bombas de infusão. Um parser extrai variáveis e alarmes reconhecidos e os converte em mensagens compactas legadas. Essas mensagens entram em uma FIFO e são agrupadas em quadros de até 58 caracteres.
@@ -60,8 +71,8 @@ Fonte → parser → codec/framing → Manchester → AFG/LED → canal → PD �
 ## Resumo comparativo
 
 As três linhas originais estão resumidas abaixo. As propostas 4 e 5, formalizadas
-em 02/11/2026, têm comparação própria na seção de decisão ao final; a proposta 4
-é a prioridade inicial atual, sem invalidar o trabalho já realizado na proposta 2.
+em 02/11/2026, têm comparação própria na seção de decisão ao final. A prioridade
+vigente é a proposta 6, formalizada em 09/11/2026, sem invalidar trabalhos anteriores.
 
 | Critério | 1. Compressão temporal aprendida | 2. Equalização/detecção neural | 3. Controle adaptativo contextual |
 | --- | --- | --- | --- |
@@ -389,19 +400,148 @@ com FEC igualar a rede, ganho depender apenas de LPIPS, domínio estreito e cust
 computacional/latência anular economia de transmissão. Não há código desta proposta
 na pasta `equalizador_neural_2/`; essa pasta implementa somente a proposta 4.
 
+## 6. Codificação neural de telemetria por VLC — motivação de confidencialidade
+
+### Escopo acordado e pergunta experimental
+
+Retomar a aplicação médica da proposta 1, mas **sem confundir seus objetivos**:
+o preditor temporal com resíduos continua sendo uma proposta de compressão;
+esta nova linha é uma prova de conceito de transformação neural, transporte
+físico da representação e reconstrução no destinatário. Não é requisito reduzir
+o número de bits: pode haver expansão. Não é requisito inicial superar métodos
+clássicos ou coletar sinais de interceptadores.
+
+**Pergunta:** é possível codificar mensagens compactas efetivamente produzidas
+pelos parsers dos aparelhos, serializar a representação neural em bits, transmiti-la
+pelo VLC existente e reconstruir as mensagens com fidelidade observada exata,
+quantificando falhas, recursos e limitações da implementação?
+
+```text
+Monitor / ventilador / bombas → TCP → parser e fila legados
+  → mensagem compacta → bytes → encoder neural → latentes binários
+  → framing → Manchester → MDO3012 → amplificador/Bias-Tee/LED
+  → ar → Hyperion → MDO3012 → sincronização e demodulação
+  → validação do quadro → decoder neural → mensagem reconstruída
+  → verificação de sintaxe/validade → registro de pesquisa
+```
+
+Manter o setup CXA1507/Juntek DPA-2698/Bias-Tee 5575A/Hyperion do capítulo 4
+de Camporez, sujeito à conferência presencial. A primeira versão pode operar
+a 1 Mbps, sem varredura de taxa e sem equalizador neural. Equipamentos fornecem
+telemetria; não enviar comandos de controle clínico pela implementação experimental.
+
+### Arquitetura mínima e representação transmissível
+
+Começar com **autoencoder determinístico pequeno, com gargalo binário quantizado**,
+encoder no TX e decoder no RX. Autoencoder é adequado à reconstrução, mas não
+necessariamente à compressão ou segurança. A primeira implementação pode codificar
+cada byte com uma MLP, usando mais de oito bits latentes: facilita recuperar bytes
+exatamente e preservar alarmes/identificadores do quadro compacto. Esse codec
+simples é uma referência funcional, não uma arquitetura inovadora por si só.
+
+Treinar a representação antes da integração física; congelar pesos e identificar
+o modelo nos quadros. Latentes devem ser realmente quantizados, empacotados e
+transmitidos: salvar floats sem contabilizar sua precisão não mede transmissão.
+Não se transmite novamente a mensagem original como fallback silencioso. Qualquer
+fallback futuro deve ser identificado e contabilizado separadamente.
+
+Treinar sobre o alfabeto completo de bytes é possível no protótipo; nesse caso,
+verificar os 256 símbolos é **teste de conformidade do codec**, não generalização
+para bytes inéditos nem aprendizado de semântica clínica. A diversidade experimental
+vem de mensagens, equipamentos, sessões, eventos e condições do enlace.
+
+Manter Manchester e receptor clássicos inicialmente. Isso é um codec neural digital
+transportado por VLC, **não um autoencoder de camada física treinado ponta a ponta
+com o canal**, nem um código wiretap. Acrescentar essas funções somente em outra
+etapa com hipóteses e experimentos próprios.
+
+### O que “criptografia” significa e o que este ensaio não prova
+
+A motivação de confidencialidade será registrada como hipótese/extensão. Sem chave,
+modelo de ameaça ou avaliação de interceptação, denominar o resultado obtido como
+**codificação neural experimental**, e não criptografia segura. Tratar arquitetura
+e pesos como publicáveis; não atribuir segurança à dificuldade de interpretar um
+vetor latente. Nesta etapa não existe segredo criptográfico definido.
+
+O teste solicitado de remover/bypassar o decoder pode comparar bytes latentes
+diretamente com a mensagem ou tentar interpretá-los com o parser legado. Ele
+demonstra **incompatibilidade de representação/dependência do codec**. Mesmo que
+essa interpretação falhe, não prova irrecuperabilidade sem o decoder fornecido:
+uma transformação conhecida pode ser invertida por outros meios. Não apresentar
+essa ablação como prova de confidencialidade. Decoder errado é outro controle
+funcional opcional, sujeito à mesma ressalva.
+
+Conjecturas sobre privacidade, aplicação clínica e segurança de camada física
+podem aparecer na discussão, explicitamente como **não testadas**. Se uma futura
+etapa quiser alegar confidencialidade, deverá definir chave ou vantagem de canal,
+adversário e métricas de vazamento/ataque. A base experimental inicial permite
+alegações de transporte e reconstrução, não de segurança nem de novidade universal.
+
+### Fidelidade, validade e métricas mínimas
+
+- Comparar os bytes antes do encoder aos bytes depois do decoder, incluindo
+  alarmes, valores, identificadores e delimitadores. Não medir apenas erro médio.
+- Separar fidelidade do codec em canal ideal, BER dos bits codificados no enlace,
+  erros de bytes/mensagens após decoder e rejeições por sincronização/framing/CRC.
+- Contabilizar todas as tentativas: mensagens rejeitadas não são reconstruções
+  perfeitas. Informar recuperação exata entre aceitas **e entre todas as tentativas**.
+- CRC detecta erros acidentais; não autentica nem protege contra adulteração.
+  Não encaminhar saídas inválidas ou desatualizadas como medidas clínicas válidas.
+- “Zero perda” significa **zero erros observados em N mensagens/B bits**, nas
+  condições testadas; não prova erro probabilístico zero. Meta inicial é exatidão
+  no quadro compacto, sem introduzir novas perdas na fonte. “Perda mínima” só
+  poderá ser adotada depois de definir limites por variável e por evento.
+- Relatar expansão/compressão, cabeçalhos, tempo de encoder/decoder, tempo de
+  transferência/aquisição, latência e goodput medidos. Não deduzir tempo real
+  apenas da taxa Manchester nominal.
+- Os arredondamentos e lacunas dos parsers legados não desaparecem com um codec
+  exato. A comparação inicial é contra o quadro compacto, não todo o HL7 original.
+
+### Plano simples, portões e contribuição possível
+
+1. Teste offline com telemetria sintética identificada como tal; quantização real,
+   serialização e reconstrução byte a byte. Congelar modelo somente após conformidade.
+2. Capturar mensagens reais desidentificadas após o parser, preservando sessão,
+   dispositivo, ordem e tentativas. Não versionar dados de pacientes.
+3. Replay em blocos pelo VLC, mantendo as fontes dos aparelhos. Esse modo valida
+   transporte de dados de origem real, mas não comunicação online fim a fim.
+4. Repetir em sessões físicas distintas e registrar todas as falhas. A coleta
+   assistida pelo TX completo pode servir ao piloto, declarando essa assistência;
+   demonstração independente exige framing/preâmbulo público e receptor sem TX.
+5. Ablação sem decoder apenas como controle de representação, e referência ideal
+   sem canal para separar codec e enlace. Não é obrigatório competir com codecs
+   clássicos nesta fase; não fazer alegações comparativas sem experimentos.
+6. Integrar encoder antes da modulação e decoder após recepção em um caminho
+   separado do legado, sem inicialização elétrica implícita, sem comandos às bombas
+   e sem encaminhamento clínico de dados de pesquisa. Só alegar online após medi-lo.
+
+**Resultado defensável:** prova de conceito reprodutível de reconstrução neural
+de mensagens médicas codificadas em um enlace VLC físico, com contagens, perdas,
+overhead, ablações funcionais e escopo explícito. É potencialmente um demonstrador
+ou estudo de integração; a adequação a um artigo e ao veículo pretendido depende
+da profundidade experimental e revisão bibliográfica. Acerto de reconstrução,
+sozinho, não comprova inovação algorítmica ou segurança. Não é possível substituir
+as evidências dessas alegações por conjecturas, mesmo com transmissão bem-sucedida.
+
+**Implementação:** `codificacao_neural/`, independente dos equalizadores. Reutilizar
+Manchester, instrumentação, parsers e coleta auditável por caminhos explícitos,
+sem alterar suas fontes ou disparar automaticamente o sistema clínico legado.
+
 ## Recomendação de trajetória e decisão
 
 ### Prioridade com a bancada disponível
 
-**Priorizar inicialmente a caracterização da proposta 4**, mantendo a proposta 2
-como linha preservada e infraestrutura reutilizável. A proposta 5 é uma alternativa
-independente, não uma etapa obrigatória do equalizador nem um projeto a combinar
-imediatamente com ele. Nenhuma contribuição de ML está garantida.
+**Priorizar a proposta 6**, por decisão de 09/11/2026, com telemetria dos aparelhos,
+codec neural quantizado e fidelidade experimental. Suspender campanhas de equalização
+como objetivo ativo, preservando propostas 2/4, código, capturas e resultados.
+Não é necessário aumentar taxa ou demonstrar vantagem sobre clássicos no primeiro
+demonstrador. Isso também limita as conclusões: sem esses testes, não há alegação
+de superioridade; sem estudo de segurança, não há confidencialidade comprovada.
 
-1. Validar software offline e plano de sessão; documentar limites e conferir bancada presencialmente.
-2. Fazer caracterização/varredura de taxa sem ruído adicional, com aquisição coerente.
-3. Identificar distorção recuperável e limitações das referências clássicas antes de escolher foco neural.
-4. Coletar sessões independentes e avaliar rede pequena sem confundir taxa nominal, goodput e latência.
+1. Validar codec/quantização/framing em software, sem conectar instrumentos.
+2. Preparar captura desidentificada das mensagens compactas reais e confirmar setup completo.
+3. Transmitir representações neurais por blocos, preservando falhas e referências de avaliação.
+4. Avaliar fidelidade, expansão, entrega e latência; só depois integrar fluxo online.
 
 A proposta 1 pode avançar em paralelo como análise de compressibilidade, sem treinar DL de imediato. A proposta 3 pode reaproveitar a campanha física, mas só deve tornar-se foco se houver mudança de canal e vantagem sobre regras simples.
 
@@ -409,13 +549,16 @@ A proposta 1 pode avançar em paralelo como análise de compressibilidade, sem t
 
 | Resultado do piloto | Decisão |
 | --- | --- |
+| Codec neural reconstrói exatamente os dados | Na proposta 6, registrar prova de conceito e volume testado; não inferir segurança ou superioridade. |
+| Bypass do decoder não produz mensagem válida | Registrar dependência da representação, não prova de irrecuperabilidade/confidencialidade. |
+| Há perdas de quadros ou alterações de alarmes | Não encaminhar como telemetria válida; corrigir/proteger protocolo e relatar falhas antes de integração online. |
 | Predição clássica comprime tanto quanto ML | Não insistir na proposta 1 como artigo de ML; ampliar diversidade apenas se houver hipótese fundamentada. |
 | Equalização clássica iguala a rede | Não atribuir ganho ao ML; investigar condições físicas relevantes ou encerrar a hipótese. |
 | Enlace nominal não apresenta erros na campanha | Não alegar redução da BER nominal; na proposta 2, AWGN numérico permanece ensaio separado. Na proposta 4, caracterizar taxas maiores com aquisição coerente e limites autorizados, sem garantia de margem neural. |
 | Ponto fixo/heurística resolve a adaptação | Não iniciar RL para criar complexidade artificial; reconsiderar a proposta 3. |
 | Bancada indisponível | Fazer parsers, codecs e protótipos em simulação, delimitando resultados; não apresentar validação experimental inexistente. |
 
-### Decisão atual entre as novas linhas
+### Comparação histórica das propostas 4 e 5 — não é a prioridade vigente
 
 | Critério | 4. Equalização limitada por banda | 5. Compressão/reconstrução de imagens |
 | --- | --- | --- |
@@ -426,7 +569,7 @@ A proposta 1 pode avançar em paralelo como análise de compressibilidade, sem t
 | Risco científico | Clássico resolver a distorção | Codec clássico protegido igualar ganho; métrica perceptual ocultar perda |
 | Primeiro portão | Existe distorção recuperável relevante? | Existe ganho qualidade/recursos sem erros e depois sob canal? |
 
-Escolher 4 primeiro se o objetivo for continuidade do trabalho e comparação
+Na recomendação de 02/11/2026, escolher 4 primeiro se o objetivo fosse continuidade do trabalho e comparação
 experimental controlável. Escolher 5 se o interesse central for representação de
 imagens, houver tempo/recursos para o codec e objetivo claro de qualidade/recursos.
 Não tratar a aparência mais atraente da demonstração como evidência de novidade.
@@ -446,5 +589,8 @@ Correções de parser, CRC, sequência, coleta e sincronização podem ser essen
 - **Ulkar et al. (2020), “VLCnet: Deep learning based end-to-end visible light communication system”, Journal of Lightwave Technology:** referência de DL para comunicação VLC.
 - **Shi et al. (2023), “Optimal adaptive waveform design utilizing an end-to-end learning-based pre-equalization neural network in an UVLC system”, Journal of Lightwave Technology:** referência de adaptação/pré-equalização aprendida.
 - **Camporez (2025), “AI-Based Strategies for Handover Enhancement in Visible Light Communication Systems”:** tese citada no relatório FINEP, contextualizando decisões adaptativas.
+- **Abadi e Andersen (2016), “Learning to Protect Communications with Adversarial Neural Cryptography”, https://arxiv.org/abs/1610.06918:** linha de criptografia neural adversarial; não valida segurança de um autoencoder comum.
+- **Coutinho et al. (2018), “Learning Perfectly Secure Cryptography to Protect Communications with Adversarial Neural Cryptography”, https://pmc.ncbi.nlm.nih.gov/articles/PMC5982701/:** limitações da inferência de segurança a partir de um adversário neural fraco.
+- **“Wiretap Code Design by Neural Network Autoencoders” (2019), https://doi.org/10.1109/TIFS.2019.2945619:** referência para extensão futura com canal de interceptação e objetivo explícito de vazamento; não é a implementação mínima da proposta 6.
 
 A alegação final de novidade requer revisão bibliográfica específica da linha escolhida; estas referências fundamentam a discussão, mas não demonstram ausência de trabalhos semelhantes.
