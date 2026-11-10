@@ -1,12 +1,14 @@
 # Etapas presenciais — proposta 6
 
-**Ainda não executadas para esta proposta.** Não continuar automaticamente uma
-sessão de novembro anterior: conferir montagem, alimentação, conexão e limites atuais.
+**Estado em 10/11/2026:** usuário relatou testes MATLAB aprovados e reconstrução
+física exata da mensagem sintética em duas sessões. Artefatos não conferidos aqui
+ainda. Fonte real do monitor é a próxima etapa, conforme [MONITOR.md](MONITOR.md).
+Não continuar automaticamente uma sessão anterior: conferir montagem, alimentação, conexão e limites atuais.
 Não reutilizar configurações históricas como medições presentes.
 
 ## 1. Sem instrumentos
 
-1. Preparar Python, executar os 7 testes e o demo do README.
+1. Preparar Python, executar os testes e o demo do README (15 testes Python na atualização de 10/11).
 2. Conferir `training.json`: `state=conformant`, zero erros nos 256 bytes.
 3. Conferir roundtrip ideal: `complete=true` e `exact_match=true`.
 4. Executar o bypass como controle de representação, sem alegação de segurança.
@@ -25,17 +27,19 @@ Os testes não usam instrumentos. Não foram executados no ambiente Linux.
 
 ## 2. Fonte médica e telemetria
 
-Obter mensagens compactas reais após parser, desidentificadas, com autorização.
-Preservar ordem e registrar sessão/dispositivo/cadência, com cobertura de alarmes
-explicitada. Não tratar limitações do parser como preservação integral do equipamento.
+Somente o monitor, em pesquisa; sensor de dedo pode fornecer PR, não HR de ECG.
+Obter uma leitura pela inspeção MLLP conforme MONITOR.md e selecionar o sinal correto.
+Não coletar outras variáveis, alarmes ou dados dos equipamentos excluídos. Preservar
+ordem e registrar sessão/taxa/cadência. Identificadores do HL7 não são salvos;
+isso não torna medições de voluntários automaticamente anônimas.
 
 Primeiro replay de um frame real exportado com `export_compact_frame` e convertido
 por `workflow.py encode`. Uma captura por pacote do manifesto; não truncar mensagens
 para caber. Treino do alfabeto não precisa de dados de pacientes.
 
-Ainda falta um coletor TCP isolado somente de leitura: não executar o sistema
-legado completo apenas para obter mensagens, pois pode habilitar AFG e comandos
-do gateway aos aparelhos. Nenhuma etapa deve interferir em assistência clínica.
+Usar `monitor_capture.py --listen`, sem executar o sistema legado completo,
+que pode habilitar AFG e comandos do gateway. O coletor novo ainda precisa de
+validação presencial. Ele não envia ACK HL7; registrar caso o monitor o exija.
 
 ## 3. Conferir bancada e adquirir um pacote
 
@@ -90,8 +94,8 @@ no inventário, sem misturá-las como fragmentos da tentativa seguinte.
 
 ## 5. Portões posteriores
 
-- Confirmar primeiro roundtrip físico antes de registrar campanha de aparelhos.
+- Confirmar primeiro roundtrip físico com uma leitura real do monitor.
 - Várias mensagens e sessões independentes, sem alegar independência por fragmento.
-- Integrar captura TCP somente de leitura, depois online se houver necessidade.
+- Validar coletor TCP somente de leitura, depois integrar online se houver necessidade.
 - Preâmbulo público/recepção sem TX antes de alegar receptor independente.
-- Nunca encaminhar reconstrução experimental para decisão clínica ou controle de bomba.
+- Nunca encaminhar reconstrução experimental para decisão clínica ou controle de equipamento.

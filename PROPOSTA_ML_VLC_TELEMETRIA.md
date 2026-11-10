@@ -24,7 +24,18 @@ mantendo a bancada óptica existente. Código novo em `codificacao_neural/`;
 propostas anteriores, equalizadores e capturas ficam preservados. As prioridades
 anteriores neste documento são históricas quando conflitarem com esta atualização.
 
+**Restrição de escopo em 10/11/2026 — vigente:** usar somente o **monitor de
+frequência cardíaca/pulso**, em bancada de pesquisa, sem pacientes. Excluir ventilador,
+bombas, demais variáveis e alarmes da proposta 6; referências a esses equipamentos
+nas propostas antigas descrevem o legado, não requisitos atuais. Sensor de dedo
+pode fornecer **PR (taxa de pulso óptica)**, distinta de **HR (frequência cardíaca
+do ECG)**: identificar o campo realmente recebido e não renomeá-lo. Não usar o
+codec ou esta bancada para diagnóstico ou decisão clínica.
+
 ### Aplicação e bancada
+
+Esta subseção descreve o sistema legado completo. O experimento vigente está
+restrito ao monitor e à taxa selecionada, conforme atualização acima e proposta 6.
 
 O sistema recebe dados de equipamentos médicos por TCP, incluindo mensagens HL7 de observação (`ORU`) e tráfego binário de bombas de infusão. Um parser extrai variáveis e alarmes reconhecidos e os converte em mensagens compactas legadas. Essas mensagens entram em uma FIFO e são agrupadas em quadros de até 58 caracteres.
 
@@ -412,12 +423,12 @@ o número de bits: pode haver expansão. Não é requisito inicial superar méto
 clássicos ou coletar sinais de interceptadores.
 
 **Pergunta:** é possível codificar mensagens compactas efetivamente produzidas
-pelos parsers dos aparelhos, serializar a representação neural em bits, transmiti-la
+pelo parser do monitor para a taxa selecionada, serializar a representação neural em bits, transmiti-la
 pelo VLC existente e reconstruir as mensagens com fidelidade observada exata,
 quantificando falhas, recursos e limitações da implementação?
 
 ```text
-Monitor / ventilador / bombas → TCP → parser e fila legados
+Monitor de frequência cardíaca/pulso → TCP 2222 → parser HR/PR
   → mensagem compacta → bytes → encoder neural → latentes binários
   → framing → Manchester → MDO3012 → amplificador/Bias-Tee/LED
   → ar → Hyperion → MDO3012 → sincronização e demodulação
@@ -427,16 +438,18 @@ Monitor / ventilador / bombas → TCP → parser e fila legados
 
 Manter o setup CXA1507/Juntek DPA-2698/Bias-Tee 5575A/Hyperion do capítulo 4
 de Camporez, sujeito à conferência presencial. A primeira versão pode operar
-a 1 Mbps, sem varredura de taxa e sem equalizador neural. Equipamentos fornecem
-telemetria; não enviar comandos de controle clínico pela implementação experimental.
+a 1 Mbps, sem varredura de taxa e sem equalizador neural. Somente o monitor fornece
+telemetria; ventilador, bombas, demais variáveis, alarmes e comandos de controle
+ficam fora do escopo. A medição voluntária no dedo é apenas fonte de pesquisa;
+não equivale a validação clínica, e exige observar os procedimentos institucionais.
 
 ### Arquitetura mínima e representação transmissível
 
 Começar com **autoencoder determinístico pequeno, com gargalo binário quantizado**,
 encoder no TX e decoder no RX. Autoencoder é adequado à reconstrução, mas não
 necessariamente à compressão ou segurança. A primeira implementação pode codificar
-cada byte com uma MLP, usando mais de oito bits latentes: facilita recuperar bytes
-exatamente e preservar alarmes/identificadores do quadro compacto. Esse codec
+cada byte com uma MLP, usando mais de oito bits latentes: facilita recuperar
+exatamente os bytes do quadro compacto da taxa selecionada (HR ou PR). Esse codec
 simples é uma referência funcional, não uma arquitetura inovadora por si só.
 
 Treinar a representação antes da integração física; congelar pesos e identificar
@@ -448,7 +461,8 @@ fallback futuro deve ser identificado e contabilizado separadamente.
 Treinar sobre o alfabeto completo de bytes é possível no protótipo; nesse caso,
 verificar os 256 símbolos é **teste de conformidade do codec**, não generalização
 para bytes inéditos nem aprendizado de semântica clínica. A diversidade experimental
-vem de mensagens, equipamentos, sessões, eventos e condições do enlace.
+vem de mensagens, sessões de coleta e condições do enlace, não de pacientes
+ou equipamentos diversos nesta primeira etapa.
 
 Manter Manchester e receptor clássicos inicialmente. Isso é um codec neural digital
 transportado por VLC, **não um autoencoder de camada física treinado ponta a ponta
@@ -480,7 +494,7 @@ alegações de transporte e reconstrução, não de segurança nem de novidade u
 ### Fidelidade, validade e métricas mínimas
 
 - Comparar os bytes antes do encoder aos bytes depois do decoder, incluindo
-  alarmes, valores, identificadores e delimitadores. Não medir apenas erro médio.
+  identificação HR/PR, valor e delimitadores. Não medir apenas erro médio.
 - Separar fidelidade do codec em canal ideal, BER dos bits codificados no enlace,
   erros de bytes/mensagens após decoder e rejeições por sincronização/framing/CRC.
 - Contabilizar todas as tentativas: mensagens rejeitadas não são reconstruções
@@ -489,8 +503,9 @@ alegações de transporte e reconstrução, não de segurança nem de novidade u
   Não encaminhar saídas inválidas ou desatualizadas como medidas clínicas válidas.
 - “Zero perda” significa **zero erros observados em N mensagens/B bits**, nas
   condições testadas; não prova erro probabilístico zero. Meta inicial é exatidão
-  no quadro compacto, sem introduzir novas perdas na fonte. “Perda mínima” só
-  poderá ser adotada depois de definir limites por variável e por evento.
+  no quadro compacto, sem introduzir novas perdas na fonte. “Perda mínima” não
+  autoriza arredondamento silencioso: o coletor inicial só exporta valores inteiros
+  representáveis; ausência, decimais e status não aceitos ficam registrados, não imputados.
 - Relatar expansão/compressão, cabeçalhos, tempo de encoder/decoder, tempo de
   transferência/aquisição, latência e goodput medidos. Não deduzir tempo real
   apenas da taxa Manchester nominal.
@@ -501,9 +516,11 @@ alegações de transporte e reconstrução, não de segurança nem de novidade u
 
 1. Teste offline com telemetria sintética identificada como tal; quantização real,
    serialização e reconstrução byte a byte. Congelar modelo somente após conformidade.
-2. Capturar mensagens reais desidentificadas após o parser, preservando sessão,
-   dispositivo, ordem e tentativas. Não versionar dados de pacientes.
-3. Replay em blocos pelo VLC, mantendo as fontes dos aparelhos. Esse modo valida
+2. Capturar mensagens reais do monitor após o parser, preservando sessão,
+   tipo de taxa, ordem e tentativas. Não persistir HL7 bruto, PID, nomes ou IDs;
+   manter apenas observações numéricas HR/PR e metadados mínimos. Mesmo dados de
+   voluntário podem ser sensíveis: não versioná-los nem tratá-los como anônimos por definição.
+3. Replay em blocos pelo VLC, mantendo a origem do monitor. Esse modo valida
    transporte de dados de origem real, mas não comunicação online fim a fim.
 4. Repetir em sessões físicas distintas e registrar todas as falhas. A coleta
    assistida pelo TX completo pode servir ao piloto, declarando essa assistência;
@@ -512,8 +529,8 @@ alegações de transporte e reconstrução, não de segurança nem de novidade u
    sem canal para separar codec e enlace. Não é obrigatório competir com codecs
    clássicos nesta fase; não fazer alegações comparativas sem experimentos.
 6. Integrar encoder antes da modulação e decoder após recepção em um caminho
-   separado do legado, sem inicialização elétrica implícita, sem comandos às bombas
-   e sem encaminhamento clínico de dados de pesquisa. Só alegar online após medi-lo.
+   separado do legado, sem inicialização elétrica implícita, gateway/UI ou comandos
+   ao monitor. Só alegar online após medi-lo; o coletor TCP e o replay VLC são etapas separadas.
 
 **Resultado defensável:** prova de conceito reprodutível de reconstrução neural
 de mensagens médicas codificadas em um enlace VLC físico, com contagens, perdas,
@@ -526,12 +543,19 @@ as evidências dessas alegações por conjecturas, mesmo com transmissão bem-su
 **Implementação:** `codificacao_neural/`, independente dos equalizadores. Reutilizar
 Manchester, instrumentação, parsers e coleta auditável por caminhos explícitos,
 sem alterar suas fontes ou disparar automaticamente o sistema clínico legado.
+O coletor `monitor_capture.py` recebe somente na porta configurada (padrão 2222),
+monta HL7/MLLP completo e distingue os identificadores de HR e PR do registro legado.
+Não envia bytes de aplicação ou ACK HL7; confirmar se o monitor requer ACK antes
+de alterar essa política. Primeiro executar inspeção; depois selecionar um único
+sinal para exportar `!#MDHRnnnn` ou `!#MDPRnnnn`. Não usar ausência de HR durante
+medição no dedo como falha de transmissão se a origem realmente fornece PR.
 
 ## Recomendação de trajetória e decisão
 
 ### Prioridade com a bancada disponível
 
-**Priorizar a proposta 6**, por decisão de 09/11/2026, com telemetria dos aparelhos,
+**Priorizar a proposta 6**, por decisão de 09/11/2026 e restrição de 10/11/2026, com
+somente frequência cardíaca/pulso do monitor,
 codec neural quantizado e fidelidade experimental. Suspender campanhas de equalização
 como objetivo ativo, preservando propostas 2/4, código, capturas e resultados.
 Não é necessário aumentar taxa ou demonstrar vantagem sobre clássicos no primeiro
@@ -539,7 +563,7 @@ demonstrador. Isso também limita as conclusões: sem esses testes, não há ale
 de superioridade; sem estudo de segurança, não há confidencialidade comprovada.
 
 1. Validar codec/quantização/framing em software, sem conectar instrumentos.
-2. Preparar captura desidentificada das mensagens compactas reais e confirmar setup completo.
+2. Inspecionar HR/PR na porta 2222, selecionar o sinal do monitor e confirmar setup completo.
 3. Transmitir representações neurais por blocos, preservando falhas e referências de avaliação.
 4. Avaliar fidelidade, expansão, entrega e latência; só depois integrar fluxo online.
 

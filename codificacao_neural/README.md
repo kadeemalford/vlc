@@ -5,6 +5,11 @@ transportar a representação de mensagens compactas dos aparelhos no setup VLC
 existente. Não exige compressão, alta taxa, vantagem sobre clássicos ou estudo
 de interceptadores na primeira etapa.
 
+**Escopo vigente desde 10/11/2026:** somente taxa cardíaca/pulso do monitor em
+bancada de pesquisa. Ventilador, bombas, alarmes e demais variáveis não integram
+a proposta ativa. No sensor de dedo, confirmar **PR**, sem confundi-la com **HR
+do ECG**. Ver [MONITOR.md](MONITOR.md) para a captura TCP isolada.
+
 **Não é criptografia comprovada.** Não há chave, autenticação ou adversário neste
 protótipo. O controle sem decoder demonstra incompatibilidade de representação,
 não impossibilidade de recuperação por terceiros. Pesos, arquitetura e formato
@@ -23,11 +28,12 @@ Resultados efetivamente executados: [demo offline](reports/offline_demo_20261109
 | Autoencoder MLP com latentes binários e serialização | Implementado e testado em Python |
 | Reconstrução exata do alfabeto de 256 bytes | Verificada offline, seeds 42/43/44 |
 | Framing, CRC, fragmentação, identificação de modelo | Implementados e testados |
-| Decoder de capturas MATLAB alinhadas e aceitas | Testado com waveforms sintéticas, não com dado físico novo |
+| Decoder de capturas MATLAB alinhadas e aceitas | Testado offline; usuário relatou dois roundtrips físicos exatos, artefatos ainda não conferidos aqui |
 | Controle sem decoder | Implementado; não é teste de segurança |
-| Exportação MATLAB da mensagem compacta | Implementada; teste MATLAB pendente |
-| Replay MATLAB de um pacote pelos instrumentos abertos | Implementado; teste MATLAB/físico pendente |
-| Captura automática dos aparelhos e integração online | Não implementadas nesta pasta |
+| Exportação MATLAB da mensagem compacta | Implementada; usuário relatou testes MATLAB aprovados |
+| Replay MATLAB de um pacote pelos instrumentos abertos | Usuário relatou sucesso em 09 e 10/11/2026 com mensagem sintética |
+| Coletor TCP isolado do monitor | Implementado; testes de framing/parser aprovados; validação presencial pendente |
+| Integração monitor → VLC online | Não implementada; captura e replay continuam separados |
 | Preâmbulo/receptor independente de TX | Não implementados; replay usa alinhamento assistido |
 | Segurança de camada física/criptografia | Não demonstradas, fora do ensaio mínimo |
 
@@ -98,13 +104,16 @@ O decode normal usa somente `rx_aligned` de capturas `status=ok`; nunca substitu
 RX por `tx_bits`. O arquivo de referência passado com `--reference` é lido apenas
 depois da reconstrução para calcular igualdade, não fornece dados ao decoder.
 
-## Aparelhos médicos: ponto de integração
+## Monitor de frequência cardíaca/pulso: ponto de integração
 
-Reutilizar `mae_handlers.m`, `mae_frame.m` e a lógica TCP/fila em
+Referência de campos e framing compacto: `mae_handlers.m`, `mae_registry.m`,
+`mae_frame.m` e a lógica TCP em
 `../vlc-system-matlab-alarm-care-pro-scripts/src/scripts/alarm-care-pro/`.
-O objeto de estudo inicial é o **frame compacto depois do parser**, não o HL7
-completo. O ponto é a saída de `fifoPopBatch`, antes de `stringToBits`/`transmitAndShow`.
-Essas funções são locais ao script legado; não existe API externa pronta nesta pasta.
+Esses scripts incluem outros equipamentos e não são executados pelo coletor novo.
+`monitor_capture.py` implementa somente recepção MLLP na porta 2222, extração
+explícita de HR/PR e exportação de uma única taxa selecionada. O objeto de estudo
+é o **frame compacto**, não o HL7 completo. Não se salva HL7 bruto ou identificadores.
+O coletor preserva a distinção HR/PR e recusa arredondamento silencioso de decimais.
 
 `matlab/export_compact_frame.m` permite exportar um frame já obtido no workspace:
 
@@ -114,10 +123,10 @@ export_compact_frame(frame, sourceDir, 'session01_message0001');
 ```
 
 Não executar `real_time_mae_vlc(false)` apenas para capturar: ele inicializa AFG,
-abre servidores e configura callback de comandos aos aparelhos. O próximo trabalho
-é extrair/adaptar um coletor somente de leitura, com enquadramento TCP correto,
-sem gateway/UI/controle de bombas. Não está pronto. Por enquanto, exportação
-supervisionada ou replay de mensagens reais autorizadas é a etapa disponível.
+abre servidores e configura callback de comandos aos aparelhos. Usar o coletor
+isolado conforme MONITOR.md; ele não transmite dados de aplicação, não importa
+VISA nem acessa gateway/UI. Primeiro inspecionar HR/PR, depois exportar uma leitura
+e usar `workflow.py encode`. Captura TCP não equivale a integração VLC online.
 
 Dados médicos e identificadores não devem ir ao Git, snapshots ou logs públicos.
 Observar autorização/ética local. Exemplos `synthetic_*.bin` não são medidas clínicas.
@@ -147,7 +156,9 @@ sem comparações não há superioridade, sem ataques/modelo de segurança não 
 manual ao PC da bancada. Checkpoints PyTorch devem vir de origem confiável; loader
 usa `weights_only=True`, não pickle arbitrário de objetos completos.
 
-Nenhum comando Python acessa instrumentos, rede TCP, pacientes, gateway ou UI.
+`workflow.py` e o demo não acessam rede ou instrumentos. Somente
+`monitor_capture.py --listen` abre o listener TCP explicitamente autorizado;
+não escreve mensagens de aplicação ao monitor. Nenhum script acessa gateway/UI.
 Helpers MATLAB não inicializam nem desligam automaticamente saídas; uploads
 requerem confirmação presencial. Esta implementação não é um dispositivo médico
 nem proteção de dados adequada para uso operacional.

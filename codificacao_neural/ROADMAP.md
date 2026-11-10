@@ -12,7 +12,34 @@ O termo “criptografia” é motivação/extensão, não conclusão: falta chav
 ameaça/avaliação de segurança. Bypass do decoder mede representação, não sigilo.
 Não chamar o protótipo mínimo de código wiretap ou autoencoder de camada física.
 
-## Implementado e verificado offline
+## Atualização vigente — 10/11/2026
+
+- Usuário restringiu a fonte ao monitor de frequência cardíaca/pulso de pesquisa;
+  demais equipamentos, variáveis e alarmes estão fora da proposta ativa.
+- Sensor de dedo pode fornecer PR de oximetria; HR de ECG é outra observação.
+  Não renomear ou substituir uma pela outra. Conferir o campo realmente disponível.
+- Usuário relatou 7 testes Python e 3 testes MATLAB aprovados no Windows, demo
+  ideal exato e dois roundtrips físicos da mesma mensagem sintética de 19 bytes:
+  `neural_20261109_121857` e `neural_20261110_161357`.
+- Scores relatados de sincronização: 0,9183/0,8942 no primeiro dia e
+  0,8977/0,8946 no segundo. Decoder físico: ambos completos, 2 fragmentos aceitos,
+  igualdade exata e zero erros de bytes observados, segundo saídas confirmadas
+  pelo usuário. Bypass físico no segundo dia: 38 bytes latentes, 38 diferenças.
+  **Artefatos ainda não conferidos localmente**; BER dos bits não calculada aqui.
+- Implementado `monitor_capture.py`: listener MLLP/TCP isolado, sem VISA/gateway,
+  sem escritas de aplicação/ACK HL7, sem HL7 bruto/PID persistidos. Primeiro
+  `--signal inspect`, depois selecionar explicitamente `pulse_rate` ou `heart_rate`.
+- **15 testes Python aprovados** após a inclusão de 8 testes do coletor.
+  Smoke TCP local (127.0.0.1) com envelope sintético fragmentado: um frame PR
+  exato, zero bytes de aplicação retornados e manifesto `finished`.
+- Compatibilidade offline com o PCAP histórico do monitor: 996 envelopes MLLP
+  completos; para cada uma de HR/PR, 272 observações numéricas elegíveis e 226
+  ausentes/fora da representação. Fonte original preservada, sem logs de valores/IDs.
+  Ver `reports/monitor_receiver_20261110.md`.
+- **Monitor ao vivo ainda não testado com este coletor.** Próxima ação: atualizar
+  PC, confirmar IP de destino/porta 2222 e inspecionar o sinal com AFG OFF.
+
+## Estado inicial em 09/11/2026 — histórico
 
 - MLP de byte para 16 bits binários e decoder para byte. Expansão intencional;
   sem aprendizado do canal e sem correção de erros garantida.
@@ -39,21 +66,23 @@ Comando verificado a partir desta pasta:
 
 ## Próxima ação
 
-1. Conferir README e BANCADA, transferir/versionar fontes e recriar ambiente no Windows.
-2. Executar demo Python e os testes MATLAB sem instrumentos.
-3. Validar captura/exportação desidentificada de um frame real dos aparelhos;
-   ainda falta um coletor TCP separado, somente de leitura, com framing validado.
-4. Confirmar sessão VISA e montagem completa, incluindo amplificador; fazer replay
-   físico de uma mensagem e reconstruir sem `--ideal`.
-5. Só depois organizar campanha com mensagens/aparelhos/sessões reais e métricas
-   completas. Não alegar online porque a origem foi um aparelho.
+1. Transferir novos fontes/testes ao PC da bancada; não retreinar o codec já validado.
+2. Conferir IPv4 da interface local e destino de envio do monitor (porta 2222).
+3. Executar inspeção MLLP com AFG OFF, observar HR/PR e qualidade/contato no display.
+4. Exportar uma observação inteira válida da taxa selecionada em pasta nova.
+5. Codificar o `.bin` real com o modelo congelado; transmitir pacote(s) pelo VLC
+   numa captura identificada como fonte real, separada da referência sintética.
+6. Decodificar sem `--ideal`, conferir bytes e valor contra a origem e registrar
+   todas as tentativas. Só depois ampliar sessões e eventualmente integrar online.
 
 ## Pendências explícitas
 
-- Integração automática dos aparelhos via TCP, autenticação, FEC/retransmissão,
-  preâmbulo público/receptor sem TX, UI e métricas agregadas de campanha não prontos.
+- Coletor TCP implementado mas não validado ao vivo; falta integração monitor →
+  codec → VLC online. Autenticação, FEC/retransmissão, preâmbulo público/receptor
+  sem TX, UI e métricas agregadas de campanha não prontos.
 - Nenhum ganho de compressão/superioridade ou segurança demonstrados.
-- Nenhuma nova medição física executada por estes scripts.
+- Roundtrips físicos sintéticos relatados pelo usuário, ainda sem auditoria local
+  dos arquivos; nenhuma transmissão de fonte real confirmada até esta atualização.
 - Latentes binários não são ciphertext criptograficamente seguro.
 - CRC/fingerprint não provam autenticidade. Bit erros podem causar perda do quadro inteiro.
 - Fidelidade é contra a mensagem compacta; lacunas/arredondamentos do parser permanecem.
