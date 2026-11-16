@@ -1,0 +1,102 @@
+import net from 'net';
+import { bus, EVENTS } from '../infrastructure/EventBus';
+
+const ALLOWED_SOURCES = new Set([
+  'monitor_message',
+  'ventilator_message',
+  'bomb1_message',
+  'bomb2_message',
+  'bomb3_message',
+]);
+
+// Equipamentos que o MATLAB sabe repassar direto no socket TCP (sem VLC).
+const COMMAND_TARGETS = new Set(['bomb1', 'bomb2', 'bomb3']);
+
+interface FrontendEnvelope {
+  source: string;
+  payload: unknown;
+}
+
+// Downlink Frontend -> MATLAB. O comando é binário (protocolo SAM Manager com
+// CRC32), então viaja como base64 dentro de uma linha NDJSON.
+interface MatlabCommandEnvelope {
+  target: string;
+  command: string;
+}
+
+export class TcpGateway {
+  private server: net.Server;
+  private matlabSocket: net.Socket | null = null;
+
+  constructor(private port = 4455) {
+    this.server = net.createServer((socket) => this.handleConnection(socket));
+
+    // Uplink: frontend -> MATLAB. O DeviceServer faz o mesmo no caminho
+    // legado, escrevendo direto no socket do equipamento.
+    bus.on(EVENTS.COMMAND_SEND, ({ target, command }) =>
+      this.sendCommand(target, command)
+    );
+  }
+
+  private handleConnection(socket: net.Socket) {
+    console.log('Nova conexão: MATLAB (TcpGateway)');
+    this.matlabSocket = socket;
+    let buffer = Buffer.alloc(0);
+
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex !== -1) {
+        const line = buffer.subarray(0, newlineIndex).toString('utf8').trim();
+        buffer = buffer.subarray(newlineIndex + 1);
+        if (line) this.handleLine(line);
+        newlineIndex = buffer.indexOf('\n');
+      }
+    });
+
+    socket.on('error', (err) => {
+      console.log('Erro no TcpGateway:', err.message);
+    });
+
+    socket.on('close', () => {
+      console.log('MATLAB desconectado (TcpGateway).');
+      buffer = Buffer.alloc(0);
+      if (this.matlabSocket === socket) this.matlabSocket = null;
+    });
+  }
+
+  private sendCommand(target: string, command: Buffer) {
+    if (!COMMAND_TARGETS.has(target)) return;
+
+    const socket = this.matlabSocket;
+    if (!socket || socket.destroyed || !socket.writable) {
+      console.log(`TcpGateway: comando "${target}" descartado (MATLAB desconectado).`);
+      return;
+    }
+
+    const env: MatlabCommandEnvelope = { target, command: command.toString('base64') };
+    socket.write(`${JSON.stringify(env)}\n`, (err) => {
+      if (err) {
+        console.log(`TcpGateway: falha ao enviar comando "${target}": ${err.message}`);
+        return;
+      }
+      console.log(`TcpGateway: comando "${target}" (${command.length} bytes) enviado ao MATLAB.`);
+    });
+  }
+
+  private handleLine(line: string) {
+    try {
+      const env = JSON.parse(line) as FrontendEnvelope;
+      if (!ALLOWED_SOURCES.has(env.source)) return;
+      bus.emit(EVENTS.DEVICE_DATA, { source: env.source, payload: env.payload });
+    } catch (err) {
+      console.log('TcpGateway: linha inválida ignorada.');
+    }
+  }
+
+  public listen() {
+    this.server.listen(this.port, () => {
+      console.log(`TcpGateway (MATLAB <-> Frontend) ouvindo na porta ${this.port}`);
+    });
+  }
+}

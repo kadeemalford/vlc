@@ -99,5 +99,7 @@ ou misturar origens: o estudo inicial usa uma única taxa selecionada.
   repetidas não são prova de diversidade/independência; registrar essa limitação.
 - Ainda não é fluxo online monitor → VLC. Capturar, preparar pacote e fazer replay
   físico são etapas separadas, com consentimento e backup dos dados locais.
-- Tests de parser/framing aprovados offline; compatibilidade com o monitor ao vivo
-  e regra de ACK ainda não validadas nesta versão.
+- Testes de parser/framing aprovados offline; em 10/11/2026, usuário confirmou
+  recepção ao vivo (118 mensagens em 60 s) e exportação de PR=59 bpm, sem bytes
+  de aplicação enviados. Artefatos ainda não auditados localmente. Isso não prova
+  que todas as configurações/firmwares do monitor dispensem ACK HL7.

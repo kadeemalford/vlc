@@ -1,0 +1,860 @@
+classdef TestEopSystemViewMaeNew < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure                        matlab.ui.Figure
+        VppLabel                        matlab.ui.control.Label
+        AFGamplitudeEditField           matlab.ui.control.NumericEditField
+        AFGamplitudeEditFieldLabel      matlab.ui.control.Label
+        messageLabel                    matlab.ui.control.Label
+        SaveButton                      matlab.ui.control.Button
+        Mdo3012Lamp                     matlab.ui.control.Lamp
+        Mdo3012LampLabel                matlab.ui.control.Label
+        SimulationSwitch                matlab.ui.control.Switch
+        SimulationSwitchLabel           matlab.ui.control.Label
+        kSpsLabel                       matlab.ui.control.Label
+        SampleRateEditField             matlab.ui.control.EditField
+        SampleRateEditFieldLabel        matlab.ui.control.Label
+        BitRateEditField                matlab.ui.control.EditField
+        BitRateEditFieldLabel           matlab.ui.control.Label
+        BitsperIterationEditField       matlab.ui.control.EditField
+        BitsperIterationEditFieldLabel  matlab.ui.control.Label
+        kHzLabel                        matlab.ui.control.Label
+        BandwidthEditField              matlab.ui.control.EditField
+        BandwidthEditFieldLabel         matlab.ui.control.Label
+        kbpsLabel                       matlab.ui.control.Label
+        StartButton                     matlab.ui.control.Button
+        UIAxesQFactor                   matlab.ui.control.UIAxes
+        UIAxesSignal                    matlab.ui.control.UIAxes
+        UIAxesEyeDiagram                matlab.ui.control.UIAxes
+        UIAxesProb                      matlab.ui.control.UIAxes
+    end
+
+    
+    properties (Access = private)
+        testEopSystemController
+        lastResponses
+        maeHandles
+        maeTimer
+        maeBusy logical = false
+        maeRunning logical = false
+        qTimeList
+        qValueList
+        berEstList
+        klaasFrameBuf
+        klaasFs
+        plotEvery = 10
+        maePendingPlot logical = false
+        maePendingResponse
+    end
+    
+    methods (Access = public)
+        
+        function setViewInputs(app, ookParams)
+            app.BitRateEditField.Value = string(ookParams.bitRate/1e3); %
+            app.BandwidthEditField.Value = string(ookParams.bandwidth/1e3); %kHz
+            app.BitsperIterationEditField.Value = 'up to 500';
+            app.BitsperIterationEditField.Tooltip = {'Tamanho do payload varia com o frame clínico'};
+            app.SampleRateEditField.Value = string(ookParams.txSampleRate/1e3); %kSps
+        end
+        
+        function updateSignalAxes(app, comResponse)
+            txSamples = comResponse.txSignal.getSamples();
+            txTimesUs = comResponse.txSignal.getTimes() * 1e6;
+            rxSamples = comResponse.synchSignal.getSamples();
+            rxTimesUs = comResponse.synchSignal.getTimes() * 1e6;
+            
+            nPlot = min([100, numel(txSamples), numel(rxSamples), numel(txTimesUs), numel(rxTimesUs)]);
+            if nPlot < 1
+                return;
+            end
+            % Reaproveita os Line objects: recriar linhas+legenda a cada
+            % atualizacao e caro e travava o timer do MAE.
+            txLine = findobj(app.UIAxesSignal, 'Tag', 'txSignal');
+            if isempty(txLine)
+                plot(app.UIAxesSignal, txTimesUs(1:nPlot), txSamples(1:nPlot), ...
+                    '-', 'Color', '#0072BD', 'LineWidth', 2, 'Tag', 'txSignal', ...
+                    'DisplayName', '\color{white} Transmitted Signal');
+                hold(app.UIAxesSignal, 'on');
+                plot(app.UIAxesSignal, rxTimesUs(1:nPlot), rxSamples(1:nPlot), ...
+                    '-', 'Color', '#EDB120', 'Tag', 'rxSignal', ...
+                    'DisplayName', '\color{white} Received Signal');
+                hold(app.UIAxesSignal, 'off');
+                legend(app.UIAxesSignal, 'color', [0 0 0]);
+            else
+                rxLine = findobj(app.UIAxesSignal, 'Tag', 'rxSignal');
+                set(txLine, 'XData', txTimesUs(1:nPlot), 'YData', txSamples(1:nPlot));
+                set(rxLine, 'XData', rxTimesUs(1:nPlot), 'YData', rxSamples(1:nPlot), ...
+                    'Color', '#EDB120');
+            end
+            xlabel(app.UIAxesSignal, 'Time (\mus)', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesSignal, 'Amplitude (a.u.)', 'Color', [0.9 0.9 0.9]);
+        end
+        
+        function updateEyeDiagramAxes(app, klaas)
+            if isempty(klaas) || isempty(klaas.Y)
+                return;
+            end
+            % Estilo klaas_eop_copy/plotEyeOverview: 2 simbolos por traco
+            % (4 chips Manchester), eixo em us, ate 300 traces. Um unico
+            % Line com NaN para nao travar o timer do App Designer.
+            tPad = [klaas.tUs, NaN];
+            X = repmat(tPad, size(klaas.Y, 1), 1).';
+            Y = [klaas.Y, nan(size(klaas.Y, 1), 1)].';
+            eyeLine = findobj(app.UIAxesEyeDiagram, 'Tag', 'eyeLine');
+            if isempty(eyeLine)
+                plot(app.UIAxesEyeDiagram, X(:), Y(:), ...
+                    'Color', [22 174 240]/255, 'Tag', 'eyeLine');
+            else
+                set(eyeLine, 'XData', X(:), 'YData', Y(:));
+            end
+            xlim(app.UIAxesEyeDiagram, [0 klaas.plotTimeUs]);
+            ylim(app.UIAxesEyeDiagram, [-1.2 1.2]);
+            xlabel(app.UIAxesEyeDiagram, 'Time (\mus)', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesEyeDiagram, 'Amplitude (a.u.)', 'Color', [0.9 0.9 0.9]);
+            if isfinite(klaas.qDb)
+                title(app.UIAxesEyeDiagram, sprintf('Eye Diagram | Q = %.2f dB', klaas.qDb), ...
+                    'Color', [0.9 0.9 0.9]);
+            end
+        end
+        function updateQFactorAxes(app, tList, qFactorList)
+            qLine = findobj(app.UIAxesQFactor, 'Tag', 'qLine');
+            if isempty(qLine)
+                plot(app.UIAxesQFactor, tList, qFactorList, 'Color', '#EDB120', 'Tag', 'qLine');
+            else
+                set(qLine, 'XData', tList, 'YData', qFactorList);
+            end
+            xlabel(app.UIAxesQFactor, 'Time (s)', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesQFactor, 'Q Factor (dB)', 'Color', [0.9 0.9 0.9]);
+        end
+        
+        function updateProbAxes(app, klaas)
+            if isempty(klaas) || isempty(klaas.posSamples) || isempty(klaas.negSamples)
+                return;
+            end
+            pos = klaas.posSamples;
+            neg = klaas.negSamples;
+            y1 = linspace(min(pos), max(pos), 50);
+            y0 = linspace(min(neg), max(neg), 50);
+            pdf1 = app.klaasPdf(y1, klaas.muPos, klaas.sigmaPos);
+            pdf0 = app.klaasPdf(y0, klaas.muNeg, klaas.sigmaNeg);
+            
+            gauss1 = findobj(app.UIAxesProb, 'Tag', 'gauss1');
+            if isempty(gauss1)
+                plot(app.UIAxesProb, pdf1, y1, 'b-', 'LineWidth', 2, ...
+                    'Color', '#0072BD', 'Tag', 'gauss1', ...
+                    'DisplayName', '\color{white} Positive PDF');
+                hold(app.UIAxesProb, 'on');
+                plot(app.UIAxesProb, pdf0, y0, 'r-', 'LineWidth', 2, ...
+                    'Color', '#A2142F', 'Tag', 'gauss0', ...
+                    'DisplayName', '\color{white} Negative PDF');
+                histogram(app.UIAxesProb, pos, ...
+                    'Normalization', 'pdf', 'FaceColor', '#0072BD', ...
+                    'FaceAlpha', 0.5, 'Orientation', 'horizontal', ...
+                    'Tag', 'hist1', ...
+                    'DisplayName', '\color{white} Positive samples');
+                histogram(app.UIAxesProb, neg, ...
+                    'Normalization', 'pdf', 'FaceColor', '#A2142F', ...
+                    'FaceAlpha', 0.5, 'Orientation', 'horizontal', ...
+                    'Tag', 'hist0', ...
+                    'DisplayName', '\color{white} Negative samples');
+                hold(app.UIAxesProb, 'off');
+                legend(app.UIAxesProb, 'color', [0 0 0]);
+            else
+                gauss0 = findobj(app.UIAxesProb, 'Tag', 'gauss0');
+                hist1 = findobj(app.UIAxesProb, 'Tag', 'hist1');
+                hist0 = findobj(app.UIAxesProb, 'Tag', 'hist0');
+                set(gauss1, 'XData', pdf1, 'YData', y1);
+                set(gauss0, 'XData', pdf0, 'YData', y0);
+                set(hist1, 'Data', pos);
+                set(hist0, 'Data', neg);
+            end
+            if isfinite(klaas.qDb)
+                title(app.UIAxesProb, sprintf('Max. eye opening (Q = %.2f dB)', klaas.qDb), ...
+                    'Color', [0.9 0.9 0.9]);
+            else
+                title(app.UIAxesProb, 'Max. eye opening', 'Color', [0.9 0.9 0.9]);
+            end
+            xlabel(app.UIAxesProb, 'Prob. Density', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesProb, 'Amplitude (a.u.)', 'Color', [0.9 0.9 0.9]);
+            ylim(app.UIAxesProb, [-1.5 1.5]);
+        end
+        
+        function bufferKlaasFrame(app, comResponse)
+            if isempty(comResponse) || isempty(comResponse.synchSignal)
+                return;
+            end
+            samples = double(comResponse.synchSignal.getSamples());
+            samples = samples(:).';
+            if numel(samples) < 2
+                return;
+            end
+            fs = comResponse.synchSignal.getSampleRate();
+            if isempty(app.klaasFs)
+                app.klaasFs = fs;
+            elseif fs ~= app.klaasFs
+                return;
+            end
+            app.klaasFrameBuf{end+1} = samples;
+            extra = numel(app.klaasFrameBuf) - app.plotEvery;
+            if extra > 0
+                app.klaasFrameBuf(1:extra) = [];
+            end
+        end
+
+        function klaas = computeKlaasEye(app, sampleCell)
+            %COMPUTEKLAASEYE Olho/Q/histograma no conjunto de frames
+            % acumulados (ate plotEvery mensagens): upsample x50, 2 simbolos
+            % por traco (0-2 us), Q na coluna de maxima abertura do Eye 1.
+            klaas = struct('tUs', [], 'Y', [], 'symTimeUs', 1, 'plotTimeUs', 2, ...
+                'qDb', NaN, 'berEst', NaN, 'posSamples', [], 'negSamples', [], ...
+                'muPos', NaN, 'muNeg', NaN, 'sigmaPos', NaN, 'sigmaNeg', NaN);
+            if nargin < 2 || isempty(sampleCell) || isempty(app.klaasFs)
+                return;
+            end
+            fs = app.klaasFs;
+            params = app.testEopSystemController.getOokParameters();
+            Rb = params.bitRate;
+            spsNative = max(1, round(fs / Rb));
+            Upsamp = 50;
+            N = spsNative * Upsamp;
+            vList = {};
+            Eye_mat = [];
+            for i = 1:numel(sampleCell)
+                samples = sampleCell{i};
+                if numel(samples) < 2 * spsNative
+                    continue;
+                end
+                oldv = 0:numel(samples)-1;
+                newv = 0:1/Upsamp:(numel(samples) - 1/Upsamp);
+                v = interp1(oldv, samples, newv);
+                nSym = floor(numel(v) / N);
+                if nSym < 1
+                    continue;
+                end
+                v = v(1:nSym * N);
+                Eye_i = reshape(v, N, nSym).';
+                Eye_mat = [Eye_mat; Eye_i]; %#ok<AGROW>
+                vList{end+1} = v; %#ok<AGROW>
+            end
+            if isempty(Eye_mat) || size(Eye_mat, 1) < 2
+                return;
+            end
+            matPos = Eye_mat;
+            matNeg = Eye_mat;
+            matPos(Eye_mat < 0) = nan;
+            matNeg(Eye_mat >= 0) = nan;
+            max_pos = min(matPos, [], 1, 'omitnan');
+            max_neg = max(matNeg, [], 1, 'omitnan');
+            max_vect = max_pos - max_neg;
+            Eyespace = 5/100;
+            hi = max(1, round(N/2) - round(N*Eyespace));
+            [~, col] = max(max_vect(1:hi));
+            mean_pos = mean(matPos, 1, 'omitnan');
+            mean_neg = mean(matNeg, 1, 'omitnan');
+            mean_vect = mean_pos - mean_neg;
+            std_pos = std(matPos, 0, 1, 'omitnan');
+            std_neg = std(matNeg, 0, 1, 'omitnan');
+            qLin = mean_vect(col) / (std_pos(col) + abs(std_neg(col)));
+            klaas.qDb = 20*log10(qLin);
+            if isfinite(qLin) && qLin > 0
+                klaas.berEst = 0.5 * erfc(qLin / sqrt(2));
+            else
+                klaas.berEst = NaN;
+            end
+            pos = matPos(:, col);
+            neg = matNeg(:, col);
+            klaas.posSamples = pos(isfinite(pos));
+            klaas.negSamples = neg(isfinite(neg));
+            klaas.muPos = mean_pos(col);
+            klaas.muNeg = mean_neg(col);
+            klaas.sigmaPos = std_pos(col);
+            klaas.sigmaNeg = std_neg(col);
+            % Figura (a): 4 olhos em [0 2] us, aberturas em 0.25/0.75/1.25/1.75.
+            % col==target => startIndex=1 (ja alinhado). col a esquerda
+            % (abertura em t=0) => soma um chip, sem tratar 0 como wrap
+            % (col-target==0 virava startIndex=0 e deslocava 0.5 us).
+            target = round(N / 4);
+            chipLen = max(1, round(N / 2));
+            startIndex = col - target + 1;
+            if startIndex < 1
+                startIndex = startIndex + chipLen;
+            end
+            startIndex = max(1, startIndex);
+            Eye2 = [];
+            for i = 1:numel(vList)
+                vPlot = vList{i}(startIndex:end);
+                nPair = floor(numel(vPlot) / (2 * N));
+                if nPair < 1
+                    continue;
+                end
+                Eye2 = [Eye2; reshape(vPlot(1:nPair * 2 * N), 2 * N, nPair).']; %#ok<AGROW>
+            end
+            if isempty(Eye2)
+                return;
+            end
+            maxTraces = min(size(Eye2, 1), 80);
+            dec = 5;
+            klaas.Y = Eye2(1:maxTraces, 1:dec:end);
+            klaas.symTimeUs = 1e6 / Rb;
+            klaas.plotTimeUs = 2 * klaas.symTimeUs;
+            tFull = (0:2*N-1) / (2*N) * klaas.plotTimeUs;
+            klaas.tUs = tFull(1:dec:end);
+        end
+        
+        function y = klaasPdf(~, x, mu, sigma)
+            if ~isfinite(sigma) || sigma <= 0
+                y = zeros(size(x));
+                return;
+            end
+            y = exp(-(x - mu).^2 ./ (2 * sigma.^2)) ./ (sigma * sqrt(2 * pi));
+        end
+        
+        function setErrorMassage(app, message)
+            app.messageLabel.Text = message;
+            app.messageLabel.FontColor = 'red';
+        end
+        
+        function setInfoMassage(app, message)
+            app.messageLabel.Text = message;
+            app.messageLabel.FontColor = 'white';
+        end
+        
+        function clearMessage(app)
+            app.messageLabel.Text = "";
+        end
+        
+    end
+
+    methods (Access = private)
+
+        function startMae(app, demoMode, runNow)
+            try
+                app.startMaeServices(demoMode);
+                if runNow
+                    app.startMaeTimer();
+                end
+            catch ME
+                app.stopMaeTimer();
+                try
+                    real_time_mae_vlc('stop');
+                catch
+                end
+                app.maeHandles = [];
+                app.setErrorMassage(sprintf('Falha ao iniciar MAE: %s', ME.message));
+            end
+        end
+
+        function startMaeServices(app, demoMode)
+            opts = struct();
+            opts.demoMode = demoMode;
+            opts.analyzer = app.testEopSystemController.getTxAnalyzer();
+            opts.vlcSystem = app.testEopSystemController.getVlcSystem();
+            opts.parameters = app.testEopSystemController.getOokParameters();
+            opts.afgAmplitude = app.AFGamplitudeEditField.Value;
+            opts.plotEvery = app.plotEvery;
+            app.maeHandles = real_time_mae_vlc('start', opts);
+            app.qTimeList = [];
+            app.qValueList = [];
+            app.berEstList = [];
+            app.klaasFrameBuf = {};
+            app.klaasFs = [];
+            app.lastResponses = [];
+            app.maePendingPlot = false;
+            app.maePendingResponse = [];
+        end
+
+        function startMaeTimer(app)
+            app.stopMaeTimer();
+            % Remove timers orfaos de execucoes anteriores. Sem isso, um
+            % timer 'MaeVlcTick' preso a uma instancia antiga continua
+            % disparando e gera "Unrecognized method ... onMaeTick".
+            staleTimers = timerfindall('Name', 'MaeVlcTickNew');
+            for k = 1:numel(staleTimers)
+                try
+                    stop(staleTimers(k));
+                    delete(staleTimers(k));
+                catch
+                end
+            end
+            app.maeTimer = timer( ...
+                'Name', 'MaeVlcTickNew', ...
+                'ExecutionMode', 'fixedSpacing', ...
+                'Period', 0.05, ...
+                'BusyMode', 'drop', ...
+                'TimerFcn', @(~,~) app.onMaeTick());
+            app.maeBusy = false;
+            app.maeRunning = true;
+            app.StartButton.Text = 'Stop';
+            start(app.maeTimer);
+            app.setInfoMassage('MAE continuo em execucao.');
+        end
+
+        function stopMaeTimer(app)
+            if ~isempty(app.maeTimer) && isvalid(app.maeTimer)
+                stop(app.maeTimer);
+                delete(app.maeTimer);
+            end
+            app.maeTimer = [];
+            app.maeBusy = false;
+            app.maeRunning = false;
+            if isvalid(app) && isvalid(app.StartButton)
+                app.StartButton.Text = 'Start';
+            end
+        end
+
+        function onMaeTick(app)
+            if ~isvalid(app) || app.maeBusy
+                return;
+            end
+            app.maeBusy = true;
+            try
+                if app.maePendingPlot
+                    app.flushPendingMaePlot();
+                else
+                    result = real_time_mae_vlc('tick');
+                    if result.didTx
+                        if ~result.syncOk || isempty(result.response)
+                            app.setErrorMassage(sprintf( ...
+                                'MAE msg %d: sincronizacao falhou (canal perdeu o frame)', ...
+                                result.iteration));
+                        else
+                            app.bufferKlaasFrame(result.response);
+                            if result.shouldPlot
+                                app.maePendingPlot = true;
+                                app.maePendingResponse = result;
+                            end
+                            if ~isempty(app.qValueList)
+                                qStr = sprintf('%.2fdB', app.qValueList(end));
+                            else
+                                qStr = 'n/a';
+                            end
+                            if ~isempty(app.berEstList) && isfinite(app.berEstList(end))
+                                berStr = sprintf('%.1e', app.berEstList(end));
+                            else
+                                berStr = 'n/a';
+                            end
+                            app.setInfoMassage(sprintf( ...
+                                'MAE msg %d | Q = %s | BER (est.) = %s', ...
+                                result.iteration, qStr, berStr));
+                        end
+                    end
+                end
+            catch ME
+                app.setErrorMassage(ME.message);
+            end
+            if isvalid(app)
+                app.maeBusy = false;
+            end
+        end
+
+        function flushPendingMaePlot(app)
+            result = app.maePendingResponse;
+            app.maePendingPlot = false;
+            app.maePendingResponse = [];
+            if isempty(result) || isempty(result.response)
+                return;
+            end
+            klaas = app.computeKlaasEye(app.klaasFrameBuf);
+            app.updateSignalAxes(result.response);
+            app.updateEyeDiagramAxes(klaas);
+            app.updateProbAxes(klaas);
+            if isfinite(klaas.qDb)
+                app.qTimeList(end+1) = result.tSec;
+                app.qValueList(end+1) = klaas.qDb;
+                app.berEstList(end+1) = klaas.berEst;
+                app.updateQFactorAxes(app.qTimeList, app.qValueList);
+            end
+            app.lastResponses = [app.lastResponses, result.response];
+            extraResp = numel(app.lastResponses) - 10;
+            if extraResp > 0
+                app.lastResponses(1:extraResp) = [];
+            end
+            drawnow limitrate
+        end
+
+    end
+    
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app)
+            % src/main: sobe de .../src/main/view/alarm-care-pro ate .../src/main
+            srcMainPath = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+            % raiz do repositorio: .../src/main -> .../src -> raiz
+            projectPath = fileparts(fileparts(srcMainPath));
+            
+            % scripts do MAE (real_time_mae_vlc) + classes de src/main.
+            % Nao usar genpath(srcMainPath) inteiro: ele coloca na path o
+            % TestEopSystemView.m (fonte editavel) e o TestEopSystemView.mlapp
+            % da pasta view/TestEopSystem, que tem o MESMO nome de classe.
+            % Essa colisao faz o MATLAB resolver a classe errada e perder
+            % metodos como onMaeTick durante a execucao.
+            addpath(fullfile(projectPath, 'src', 'scripts', 'alarm-care-pro'));
+            addpath(genpath(fullfile(srcMainPath, 'model')));
+            addpath(genpath(fullfile(srcMainPath, 'controller')));
+            
+            % creating controller obj (MDO unico TX=RX, modo MAE continuo)
+            app.testEopSystemController = TestEopSystemController(app, true);
+            
+            % changin plot title color to white
+            title(app.UIAxesEyeDiagram, "Eye Diagram", "Color", [0.9 0.9 0.9]);
+            title(app.UIAxesProb, 'Max. eye opening', "Color", [0.9 0.9 0.9]);
+            xlabel(app.UIAxesSignal, 'Time (\mus)', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesSignal, 'Amplitude (a.u.)', 'Color', [0.9 0.9 0.9]);
+            xlabel(app.UIAxesEyeDiagram, 'Time (\mus)', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesEyeDiagram, 'Amplitude (a.u.)', 'Color', [0.9 0.9 0.9]);
+            xlabel(app.UIAxesProb, 'Prob. Density', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesProb, 'Amplitude (a.u.)', 'Color', [0.9 0.9 0.9]);
+            xlabel(app.UIAxesQFactor, 'Time (s)', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesQFactor, 'Q Factor (dB)', 'Color', [0.9 0.9 0.9]);
+            ylim(app.UIAxesEyeDiagram, [-1.2 1.2]);
+            ylim(app.UIAxesProb, [-1.5 1.5]);
+            plot(app.UIAxesEyeDiagram, NaN, NaN, ...
+                'Color', [22 174 240]/255, 'Tag', 'eyeLine');
+            plot(app.UIAxesQFactor, NaN, NaN, 'Color', '#EDB120', 'Tag', 'qLine');
+
+            set(app.UIAxesProb, 'YAxisLocation', 'right');
+            
+            % setting view inputs
+            app.setViewInputs(app.testEopSystemController.getOokParameters())
+
+            demoMode = strcmp(app.SimulationSwitch.Value, 'On');
+            app.startMae(demoMode, true);
+        end
+
+        % Button pushed function: StartButton
+        function StartButtonPushed(app, event)
+            if app.maeRunning
+                % Stop: para o timer e encerra TCP/FIFO. O MDO continua
+                % conectado (o controller e o dono da sessao VISA).
+                app.stopMaeTimer();
+                try
+                    real_time_mae_vlc('stop');
+                catch
+                end
+                app.maeHandles = [];
+                app.setInfoMassage('MAE continuo parado.');
+                return;
+            end
+            app.clearMessage();
+            demoMode = strcmp(app.SimulationSwitch.Value, 'On');
+            app.startMae(demoMode, true);
+        end
+
+        % Value changed function: SimulationSwitch
+        function SimulationSwitchValueChanged(app, event)
+            % Durante o startup o controller ainda pode nao existir (a
+            % atribuicao so termina quando o construtor retorna).
+            if isempty(app.testEopSystemController) || ~isvalid(app.testEopSystemController)
+                return;
+            end
+            value = app.SimulationSwitch.Value;
+            % connectToMdo() forca o switch para On quando o MDO falha.
+            % Esse set dispara este callback de novo; como o controller ja
+            % esta em simulacao, nao ha modo para trocar (evita reentrancia
+            % e recriacao desnecessaria dos servicos).
+            if strcmp(value, 'Off') && app.testEopSystemController.isMdo()
+                return;
+            end
+            if strcmp(value, 'On') && ~app.testEopSystemController.isMdo()
+                return;
+            end
+            wasRunning = app.maeRunning;
+            app.stopMaeTimer();
+            try
+                real_time_mae_vlc('stop');
+            catch
+            end
+            if strcmp(value, 'Off')
+                app.testEopSystemController.switchToMdo();
+            else
+                app.testEopSystemController.switchToSimulation();
+            end
+            demoMode = strcmp(app.SimulationSwitch.Value, 'On');
+            app.startMae(demoMode, wasRunning);
+        end
+
+        % Button pushed function: SaveButton
+        function SaveButtonPushed(app, event)
+            if(~isempty(app.lastResponses))
+                path = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
+                folderName = datestr(datetime('now'), 'yyyy_mm_dd_HH_MM_SS');
+                dataFolderPath = fullfile(path, "data/"+folderName);
+                if ~isfolder(dataFolderPath)
+                    mkdir(dataFolderPath);
+                end
+                responses = app.lastResponses;
+                save(dataFolderPath, 'responses');
+                app.setInfoMassage("The data was saved at " + dataFolderPath)
+            else
+                app.setErrorMassage("Run a transmission first")
+            end
+        end
+
+        % Close request function: UIFigure
+        function UIFigureCloseRequest(app, event)
+            app.stopMaeTimer();
+            try
+                real_time_mae_vlc('stop');
+            catch
+            end
+            try
+                app.testEopSystemController.disconnectAnalizer()
+            catch
+            end
+            delete(app)
+            
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.AutoResizeChildren = 'off';
+            app.UIFigure.Color = [0.0902 0.0902 0.0902];
+            app.UIFigure.Position = [100 100 1080 720];
+            app.UIFigure.Name = 'TestEopSystemViewMaeNew';
+            app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
+
+            % Create UIAxesProb
+            app.UIAxesProb = uiaxes(app.UIFigure);
+            xlabel(app.UIAxesProb, 'Prob. Density')
+            ylabel(app.UIAxesProb, 'Amplitude (a.u.)')
+            zlabel(app.UIAxesProb, 'Z')
+            app.UIAxesProb.XColor = [0.902 0.902 0.902];
+            app.UIAxesProb.YColor = [0.902 0.902 0.902];
+            app.UIAxesProb.ZColor = [0.902 0.902 0.902];
+            app.UIAxesProb.Color = [0.1216 0.1216 0.1216];
+            app.UIAxesProb.XGrid = 'on';
+            app.UIAxesProb.YGrid = 'on';
+            app.UIAxesProb.GridColor = [0.15 0.15 0.15];
+            app.UIAxesProb.MinorGridColor = [0.502 0.502 0.502];
+            app.UIAxesProb.Position = [616 69 431 303];
+
+            % Create UIAxesEyeDiagram
+            app.UIAxesEyeDiagram = uiaxes(app.UIFigure);
+            xlabel(app.UIAxesEyeDiagram, 'Time (\mus)')
+            ylabel(app.UIAxesEyeDiagram, 'Amplitude (a.u.)')
+            zlabel(app.UIAxesEyeDiagram, 'Z')
+            app.UIAxesEyeDiagram.XColor = [0.902 0.902 0.902];
+            app.UIAxesEyeDiagram.YColor = [0.902 0.902 0.902];
+            app.UIAxesEyeDiagram.ZColor = [0.902 0.902 0.902];
+            app.UIAxesEyeDiagram.Color = [0.1216 0.1216 0.1216];
+            app.UIAxesEyeDiagram.XGrid = 'on';
+            app.UIAxesEyeDiagram.YGrid = 'on';
+            app.UIAxesEyeDiagram.GridColor = [0.15 0.15 0.15];
+            app.UIAxesEyeDiagram.MinorGridColor = [0.502 0.502 0.502];
+            app.UIAxesEyeDiagram.Position = [19 69 528 303];
+
+            % Create UIAxesSignal
+            app.UIAxesSignal = uiaxes(app.UIFigure);
+            xlabel(app.UIAxesSignal, 'Time (\mus)')
+            ylabel(app.UIAxesSignal, 'Amplitude (a.u.)')
+            zlabel(app.UIAxesSignal, 'Z')
+            app.UIAxesSignal.XColor = [0.902 0.902 0.902];
+            app.UIAxesSignal.YColor = [0.902 0.902 0.902];
+            app.UIAxesSignal.ZColor = [0.902 0.902 0.902];
+            app.UIAxesSignal.Color = [0.1216 0.1216 0.1216];
+            app.UIAxesSignal.XGrid = 'on';
+            app.UIAxesSignal.YGrid = 'on';
+            app.UIAxesSignal.GridColor = [0.15 0.15 0.15];
+            app.UIAxesSignal.MinorGridColor = [0.502 0.502 0.502];
+            app.UIAxesSignal.Position = [19 394 320 303];
+
+            % Create UIAxesQFactor
+            app.UIAxesQFactor = uiaxes(app.UIFigure);
+            xlabel(app.UIAxesQFactor, 'Time (s)')
+            ylabel(app.UIAxesQFactor, 'Q Factor (dB)')
+            zlabel(app.UIAxesQFactor, 'Z')
+            app.UIAxesQFactor.XColor = [0.902 0.902 0.902];
+            app.UIAxesQFactor.YColor = [0.902 0.902 0.902];
+            app.UIAxesQFactor.ZColor = [0.902 0.902 0.902];
+            app.UIAxesQFactor.Color = [0.1216 0.1216 0.1216];
+            app.UIAxesQFactor.XGrid = 'on';
+            app.UIAxesQFactor.YGrid = 'on';
+            app.UIAxesQFactor.GridColor = [0.15 0.15 0.15];
+            app.UIAxesQFactor.MinorGridColor = [0.502 0.502 0.502];
+            app.UIAxesQFactor.Position = [356 394 320 303];
+
+            % Create StartButton
+            app.StartButton = uibutton(app.UIFigure, 'push');
+            app.StartButton.ButtonPushedFcn = createCallbackFcn(app, @StartButtonPushed, true);
+            app.StartButton.Position = [945 567 100 22];
+            app.StartButton.Text = 'Start';
+
+            % Create kbpsLabel
+            app.kbpsLabel = uilabel(app.UIFigure);
+            app.kbpsLabel.FontColor = [1 1 1];
+            app.kbpsLabel.Position = [893 588 31 22];
+            app.kbpsLabel.Text = 'kbps';
+
+            % Create BandwidthEditFieldLabel
+            app.BandwidthEditFieldLabel = uilabel(app.UIFigure);
+            app.BandwidthEditFieldLabel.HorizontalAlignment = 'right';
+            app.BandwidthEditFieldLabel.FontColor = [1 1 1];
+            app.BandwidthEditFieldLabel.Position = [706 551 62 22];
+            app.BandwidthEditFieldLabel.Text = 'Bandwidth';
+
+            % Create BandwidthEditField
+            app.BandwidthEditField = uieditfield(app.UIFigure, 'text');
+            app.BandwidthEditField.Editable = 'off';
+            app.BandwidthEditField.HorizontalAlignment = 'right';
+            app.BandwidthEditField.FontColor = [0.149 0.149 0.149];
+            app.BandwidthEditField.Tooltip = {'Bw = Rb'};
+            app.BandwidthEditField.Position = [783 551 100 22];
+
+            % Create kHzLabel
+            app.kHzLabel = uilabel(app.UIFigure);
+            app.kHzLabel.FontColor = [1 1 1];
+            app.kHzLabel.Tooltip = {''};
+            app.kHzLabel.Position = [893 551 26 22];
+            app.kHzLabel.Text = 'kHz';
+
+            % Create BitsperIterationEditFieldLabel
+            app.BitsperIterationEditFieldLabel = uilabel(app.UIFigure);
+            app.BitsperIterationEditFieldLabel.HorizontalAlignment = 'right';
+            app.BitsperIterationEditFieldLabel.FontColor = [1 1 1];
+            app.BitsperIterationEditFieldLabel.Position = [675 475 93 22];
+            app.BitsperIterationEditFieldLabel.Text = 'Bits per Iteration';
+
+            % Create BitsperIterationEditField
+            app.BitsperIterationEditField = uieditfield(app.UIFigure, 'text');
+            app.BitsperIterationEditField.Editable = 'off';
+            app.BitsperIterationEditField.HorizontalAlignment = 'right';
+            app.BitsperIterationEditField.FontColor = [0.149 0.149 0.149];
+            app.BitsperIterationEditField.Tooltip = {'Tamanho do payload varia com o frame clínico'};
+            app.BitsperIterationEditField.Position = [783 475 100 22];
+            app.BitsperIterationEditField.Value = 'variável (frame clínico)';
+
+            % Create BitRateEditFieldLabel
+            app.BitRateEditFieldLabel = uilabel(app.UIFigure);
+            app.BitRateEditFieldLabel.HorizontalAlignment = 'right';
+            app.BitRateEditFieldLabel.FontColor = [1 1 1];
+            app.BitRateEditFieldLabel.Position = [720 588 48 22];
+            app.BitRateEditFieldLabel.Text = 'Bit Rate';
+
+            % Create BitRateEditField
+            app.BitRateEditField = uieditfield(app.UIFigure, 'text');
+            app.BitRateEditField.Editable = 'off';
+            app.BitRateEditField.HorizontalAlignment = 'right';
+            app.BitRateEditField.Position = [783 588 100 22];
+
+            % Create SampleRateEditFieldLabel
+            app.SampleRateEditFieldLabel = uilabel(app.UIFigure);
+            app.SampleRateEditFieldLabel.HorizontalAlignment = 'right';
+            app.SampleRateEditFieldLabel.FontColor = [1 1 1];
+            app.SampleRateEditFieldLabel.Position = [693 511 75 22];
+            app.SampleRateEditFieldLabel.Text = 'Sample Rate';
+
+            % Create SampleRateEditField
+            app.SampleRateEditField = uieditfield(app.UIFigure, 'text');
+            app.SampleRateEditField.Editable = 'off';
+            app.SampleRateEditField.HorizontalAlignment = 'right';
+            app.SampleRateEditField.Position = [783 511 100 22];
+
+            % Create kSpsLabel
+            app.kSpsLabel = uilabel(app.UIFigure);
+            app.kSpsLabel.FontColor = [1 1 1];
+            app.kSpsLabel.Position = [893 513 32 22];
+            app.kSpsLabel.Text = 'kSps';
+
+            % Create SimulationSwitchLabel
+            app.SimulationSwitchLabel = uilabel(app.UIFigure);
+            app.SimulationSwitchLabel.HorizontalAlignment = 'center';
+            app.SimulationSwitchLabel.FontColor = [1 1 1];
+            app.SimulationSwitchLabel.Position = [966 619 62 22];
+            app.SimulationSwitchLabel.Text = 'Simulation';
+
+            % Create SimulationSwitch
+            app.SimulationSwitch = uiswitch(app.UIFigure, 'slider');
+            app.SimulationSwitch.ValueChangedFcn = createCallbackFcn(app, @SimulationSwitchValueChanged, true);
+            app.SimulationSwitch.FontColor = [1 1 1];
+            app.SimulationSwitch.Position = [972 648 45 20];
+
+            % Create Mdo3012LampLabel
+            app.Mdo3012LampLabel = uilabel(app.UIFigure);
+            app.Mdo3012LampLabel.HorizontalAlignment = 'right';
+            app.Mdo3012LampLabel.FontColor = [1 1 1];
+            app.Mdo3012LampLabel.Position = [952 686 55 22];
+            app.Mdo3012LampLabel.Text = 'Mdo3012';
+
+            % Create Mdo3012Lamp
+            app.Mdo3012Lamp = uilamp(app.UIFigure);
+            app.Mdo3012Lamp.Position = [1022 686 20 20];
+            app.Mdo3012Lamp.Color = [0.8 0.8 0.8];
+
+            % Create SaveButton
+            app.SaveButton = uibutton(app.UIFigure, 'push');
+            app.SaveButton.ButtonPushedFcn = createCallbackFcn(app, @SaveButtonPushed, true);
+            app.SaveButton.Position = [945 530 100 22];
+            app.SaveButton.Text = 'Save';
+
+            % Create messageLabel
+            app.messageLabel = uilabel(app.UIFigure);
+            app.messageLabel.HorizontalAlignment = 'center';
+            app.messageLabel.FontColor = [0.9412 0.9412 0.9412];
+            app.messageLabel.Position = [131 14 820 22];
+            app.messageLabel.Text = '';
+
+            % Create AFGamplitudeEditFieldLabel
+            app.AFGamplitudeEditFieldLabel = uilabel(app.UIFigure);
+            app.AFGamplitudeEditFieldLabel.HorizontalAlignment = 'right';
+            app.AFGamplitudeEditFieldLabel.FontColor = [1 1 1];
+            app.AFGamplitudeEditFieldLabel.Position = [682 620 86 22];
+            app.AFGamplitudeEditFieldLabel.Text = 'AFG amplitude';
+
+            % Create AFGamplitudeEditField
+            app.AFGamplitudeEditField = uieditfield(app.UIFigure, 'numeric');
+            app.AFGamplitudeEditField.Limits = [0 5];
+            app.AFGamplitudeEditField.Editable = 'off';
+            app.AFGamplitudeEditField.Tooltip = {'Amplitude fixa do AFG no modo MAE continuo'};
+            app.AFGamplitudeEditField.Position = [783 620 100 22];
+            app.AFGamplitudeEditField.Value = 1;
+
+            % Create VppLabel
+            app.VppLabel = uilabel(app.UIFigure);
+            app.VppLabel.FontColor = [1 1 1];
+            app.VppLabel.Position = [893 620 27 22];
+            app.VppLabel.Text = 'Vpp';
+
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = TestEopSystemViewMaeNew
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+
+            % Execute the startup function
+            runStartupFcn(app, @startupFcn)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end

@@ -32,6 +32,14 @@ pode fornecer **PR (taxa de pulso óptica)**, distinta de **HR (frequência card
 do ECG)**: identificar o campo realmente recebido e não renomeá-lo. Não usar o
 codec ou esta bancada para diagnóstico ou decisão clínica.
 
+**Objetivo final atualizado em 16/11/2026:** integrar a codificação neural ao
+sistema completo `medical_telemetry_system/`, preservando a entrega da telemetria
+decodificada ao backend e ao painel Web. A validação inicial permanece restrita
+à taxa HR/PR do monitor; a presença de outros equipamentos no legado não os
+reintroduz no experimento. Antes de ativar o fluxo online, ampliar os testes
+isolados na bancada. Preparação da integração, sem alterar fontes ativos, em
+`medical_telemetry_system/neural_codification_changes/`.
+
 ### Aplicação e bancada
 
 Esta subseção descreve o sistema legado completo. O experimento vigente está
@@ -49,7 +57,12 @@ Equipamentos → TCP → parser → mensagens compactas → FIFO/framing
   → aquisição → sincronização → decisão → interpretação → gateway → UI
 ```
 
-A ponte MATLAB para um gateway Node está presente, mas o backend e a UI não estão nesta cópia. Comandos da UI para as bombas retornam diretamente por TCP, **sem passar pelo VLC**. O experimento atual não constitui um enlace óptico bidirecional.
+A cópia simplificada `vlc-system-matlab-alarm-care-pro-scripts/` contém a ponte
+MATLAB; desde 16/11/2026, a versão completa está disponível separadamente em
+`medical_telemetry_system/`, com MATLAB, gateway/backend Node, frontend React e
+API de usuários. Comandos da UI para as bombas retornam diretamente por TCP,
+**sem passar pelo VLC**, e devem permanecer desabilitados no ensaio neural do
+monitor. O sistema não constitui um enlace óptico bidirecional.
 
 O relatório `bibliography/FINEP_2026.md` caracteriza uma bancada correlata com LED azul CREE XLAMP XM-L2, amplificador Juntek, Bias-Tee e receptores PIN/Hyperion. A largura de banda observada é próxima de 2 MHz. O PIN com lentes apresentou maior alcance; distância, alinhamento, não linearidade e saturação influenciam os resultados. Os ensaios apresentados são **em ar**: a aplicação subaquática é uma etapa futura. Telemetria clínica e inspeção offshore são contextos de aplicação diferentes, embora possam compartilhar técnicas de comunicação.
 
@@ -425,7 +438,8 @@ clássicos ou coletar sinais de interceptadores.
 **Pergunta:** é possível codificar mensagens compactas efetivamente produzidas
 pelo parser do monitor para a taxa selecionada, serializar a representação neural em bits, transmiti-la
 pelo VLC existente e reconstruir as mensagens com fidelidade observada exata,
-quantificando falhas, recursos e limitações da implementação?
+quantificando falhas, recursos e limitações da implementação, e posteriormente
+entregá-las ao backend/painel legado com contrato preservado e latência medida?
 
 ```text
 Monitor de frequência cardíaca/pulso → TCP 2222 → parser HR/PR
@@ -434,6 +448,7 @@ Monitor de frequência cardíaca/pulso → TCP 2222 → parser HR/PR
   → ar → Hyperion → MDO3012 → sincronização e demodulação
   → validação do quadro → decoder neural → mensagem reconstruída
   → verificação de sintaxe/validade → registro de pesquisa
+  → [etapa futura] mae_frontend → gateway TCP → Socket.IO → painel legado
 ```
 
 Manter o setup CXA1507/Juntek DPA-2698/Bias-Tee 5575A/Hyperion do capítulo 4
@@ -528,9 +543,82 @@ alegações de transporte e reconstrução, não de segurança nem de novidade u
 5. Ablação sem decoder apenas como controle de representação, e referência ideal
    sem canal para separar codec e enlace. Não é obrigatório competir com codecs
    clássicos nesta fase; não fazer alegações comparativas sem experimentos.
-6. Integrar encoder antes da modulação e decoder após recepção em um caminho
-   separado do legado, sem inicialização elétrica implícita, gateway/UI ou comandos
-   ao monitor. Só alegar online após medi-lo; o coletor TCP e o replay VLC são etapas separadas.
+6. Depois de validar isoladamente, integrar encoder antes de Manchester e decoder
+   após a decisão RX no `vlc-system-matlab` completo, antes de `mae_frontend`.
+   Primeiro validar o contrato backend/UI em ambiente de teste, depois o fluxo
+   online físico. Sem inicialização elétrica implícita ou comandos ao monitor.
+   Coletor TCP e replay atuais permanecem separados; integração é objetivo futuro,
+   não resultado já demonstrado.
+
+### Integração ao sistema completo — objetivo final, ainda não aplicada
+
+O artigo-base **“Enabling Visible Light Technology for Alarm Management in
+Medical Intensive Care Units”**, arquivo `bibliography/1571377885 paper (1).pdf`,
+descreve captura de dispositivos, compactação/FIFO, Manchester/VLC, backend e
+dashboard. Esse é o sistema a estender; não duplicar a aplicação Web nem enviar
+latentes para a API. As condições da Tabela II e BER estimada de Q não substituem
+medições do setup atual, nem comprovam desempenho do codec neural.
+
+O código completo foi mapeado em `medical_telemetry_system/`. Na versão revisada,
+`real_time_mae_vlc.m` tem API `start/tick/stop` e é chamada por UIs MATLAB:
+é diferente da cópia simplificada usada inicialmente no piloto. O ponto de
+inserção é `transmitAndShow`: encoder + pacote NC1 antes de `communicate`, decoder
+e validação antes de `show`/`sendDecodedBatch`.
+
+**Transparência para a aplicação:** preservar o frame compacto e, após reconstrução
+válida, gerar o mesmo NDJSON `monitor_message`/`Monitor Measurements`. O gateway
+TCP (4455) e Socket.IO (4444) já suportam nomes distintos HR e PR; a API de
+usuários não participa da transformação neural. Em princípio não há mudança
+funcional obrigatória em backend, frontend ou API para o caminho mínimo, mas
+a compatibilidade, inatividade e entrega ao painel precisam ser testadas.
+
+Não aplicar `stringToBits`/`bitsToString` ASCII aos bytes NC1. O limite legado
+de 58 caracteres/472 bits é anterior ao codec: 10 bytes de fonte agora viram
+392 bits com framing; 58 bytes precisariam de quatro fragmentos, 1856 bits ao
+todo. Começar por uma leitura por transação, validar fragmentação e orçamento
+antes de reativar batching. O ciclo de 10 ms não garante cadência final com codec,
+upload, captura, fila e gateway.
+
+O sistema completo também tem três aquisições de retry, descarte de fila acima
+de seis chunks, sincronizador diferente do piloto e encaminhamento de frames
+divergentes após apenas um aviso. A integração deve contabilizar tentativas,
+descarte e falhas, e bloquear o envio ao painel em erro de CRC/modelo/completude.
+Não corrigir RX com dados TX nem encaminhar fonte em claro como fallback silencioso.
+Uma flag explícita separará modo neural e legado, sem alterar outros fluxos.
+
+**Inferência a decidir:** pesos congelados exportados para MATLAB, ou bridge Python
+persistente. Exigir conformidade nos 256 bytes, quantização e protocolo NC1
+idênticos; carregar uma vez e medir latência. Não retreinar online nem iniciar um
+processo Python a cada leitura. Manter fonte e modelo identificados por hash.
+
+O pacote `medical_telemetry_system/neural_codification_changes/` contém snapshots
+dos arquivos a revisar, mapa por arquivo, contrato e portões de validação.
+**Não contém uma integração ativa instalada.** Fontes originais, equalizadores,
+capturas e resultados são preservados. Primeiro continuar testes isolados, depois
+adaptador offline, teste do gateway/painel e, por último, fluxo online completo.
+
+### Estado experimental comunicado em 10/11/2026
+
+**Atualização de implementação em 16/11/2026:** após novos roundtrips sintético
+e PR=59/70 exatos relatados na bancada, usuário autorizou iniciar integração.
+Primeira versão em `codificacao_neural/live_bridge.py` e
+`medical_telemetry_system/neural_codification_changes/matlab/run_neural_monitor.m`,
+documentada em `LIVE_INTEGRATION.md`: Python persistente, PR-only, fila latest-only,
+limite de idade e validação NC1/CRC antes de publicar NDJSON ao gateway original.
+É um entrypoint de pesquisa usando o PHY do protótipo; não uma modificação da UI
+MATLAB antiga ou substituição dos fontes completos. Testes Python aprovados;
+MATLAB/Windows, gateway/painel reais e ativação física online ainda não validados.
+Os snapshots e decisões de revisão anteriores permanecem como histórico.
+
+Usuário relatou recepção MLLP do monitor e uma leitura PR=59 bpm coincidente com
+o display, exportada como `!#MDPR0059` (10 bytes). Encoder preparou pacote de
+392 bits; captura física `neural_20261110_161357_monitor_pr_1001.mat` sincronizou
+com score 0,9170 e o decode físico retornou `exact_match=true`, `byte_errors=0`.
+Antes houve roundtrips sintéticos exatos em duas sessões e controle sem decoder.
+São resultados reportados durante a operação assistida: os artefatos ainda precisam
+ser conferidos localmente para auditar BER e agregar a campanha. **Esse teste real
+foi replay de leitura registrada, não monitor → painel online**, nem demonstra
+segurança criptográfica ou erro probabilístico zero.
 
 **Resultado defensável:** prova de conceito reprodutível de reconstrução neural
 de mensagens médicas codificadas em um enlace VLC físico, com contagens, perdas,
@@ -565,7 +653,8 @@ de superioridade; sem estudo de segurança, não há confidencialidade comprovad
 1. Validar codec/quantização/framing em software, sem conectar instrumentos.
 2. Inspecionar HR/PR na porta 2222, selecionar o sinal do monitor e confirmar setup completo.
 3. Transmitir representações neurais por blocos, preservando falhas e referências de avaliação.
-4. Avaliar fidelidade, expansão, entrega e latência; só depois integrar fluxo online.
+4. Avaliar fidelidade, expansão, entrega e latência; só depois integrar ao sistema
+   completo, preservando o contrato backend/painel e medindo o fluxo online.
 
 A proposta 1 pode avançar em paralelo como análise de compressibilidade, sem treinar DL de imediato. A proposta 3 pode reaproveitar a campanha física, mas só deve tornar-se foco se houver mudança de canal e vantagem sobre regras simples.
 
@@ -605,6 +694,7 @@ Correções de parser, CRC, sequência, coleta e sincronização podem ser essen
 ## Referências e seu papel
 
 - **Scripts MATLAB desta cópia e README:** base da arquitetura e dos limites operacionais. Afirmações de latência, segurança e métricas do README precisam de verificação experimental.
+- **Luz et al., “Enabling Visible Light Technology for Alarm Management in Medical Intensive Care Units”, `1571377885 paper (1).pdf`:** sistema-base VLC/PLC e dashboard a estender; BER derivada de Q e resultados do artigo não certificam a nova camada neural nem a remontagem atual.
 - **Relatório FINEP 2026:** caracteriza a bancada correlata em ar, banda, receptores, polarização e efeitos de saturação/distância; não fornece aqui um dataset bruto pronto para ML.
 - **van der Zwaag (2020), `Dissertation_Klaas.pdf`:** contexto de VLC em ambientes de terapia intensiva e limitações do enlace.
 - **van der Zwaag et al. (2021), “A Manchester-OOK visible light communication system for patient monitoring in intensive care units”, IEEE Access:** referência da aplicação clínica Manchester-OOK.

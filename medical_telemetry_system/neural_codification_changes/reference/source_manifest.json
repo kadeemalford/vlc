@@ -1,0 +1,127 @@
+{
+  "format": "neural_integration_review_v1",
+  "state": "complete",
+  "created_at_utc": "2026-11-16T15:07:53.489468+00:00",
+  "files": [
+    {
+      "role": "modify",
+      "source": "vlc-system-matlab/src/scripts/alarm-care-pro/real_time_mae_vlc.m",
+      "snapshot": "vlc-system-matlab/src/scripts/alarm-care-pro/real_time_mae_vlc.m.reference",
+      "sha256": "98eff15573382def0c9bee13b518dc45ef996c069e2ba56255e1226160dcd40b",
+      "bytes": 37260
+    },
+    {
+      "role": "modify",
+      "source": "vlc-system-matlab/src/main/model/system/system1tx1rx/System1tx1rx.m",
+      "snapshot": "vlc-system-matlab/src/main/model/system/system1tx1rx/System1tx1rx.m.reference",
+      "sha256": "3b374e3d9ab86e2c40ca63ac68ff2f4282636f265ca9061ca5ab287fa64cd0f0",
+      "bytes": 4961
+    },
+    {
+      "role": "modify",
+      "source": "vlc-system-matlab/src/main/model/system/system1tx1rx/System1tx1rxResponse.m",
+      "snapshot": "vlc-system-matlab/src/main/model/system/system1tx1rx/System1tx1rxResponse.m.reference",
+      "sha256": "7bb5685d0f4a45229ed7788e06b71d27cc1d4bf4c6df96eaa02309b0112d4cce",
+      "bytes": 447
+    },
+    {
+      "role": "modify",
+      "source": "vlc-system-matlab/src/main/model/logicanalizers/Mdo3012/Mdo3012Analyzer.m",
+      "snapshot": "vlc-system-matlab/src/main/model/logicanalizers/Mdo3012/Mdo3012Analyzer.m.reference",
+      "sha256": "26812f4d12734817bf349f4c1d0316320032cf97ea4185916af52b479cac70ca",
+      "bytes": 15483
+    },
+    {
+      "role": "modify_if_used",
+      "source": "vlc-system-matlab/src/main/view/alarm-care-pro/TestEopSystemViewMae.m",
+      "snapshot": "vlc-system-matlab/src/main/view/alarm-care-pro/TestEopSystemViewMae.m.reference",
+      "sha256": "1d4d70549802520141c8bdeca417bd31f9aa99acec18127f41d3d51f3f1a5c63",
+      "bytes": 33851
+    },
+    {
+      "role": "modify_if_used",
+      "source": "vlc-system-matlab/src/main/view/alarm-care-pro/TestEopSystemViewMaeNew.m",
+      "snapshot": "vlc-system-matlab/src/main/view/alarm-care-pro/TestEopSystemViewMaeNew.m.reference",
+      "sha256": "4e8ee617f6473d2184aeb84e23b1b7900ad9e0cf09af70edd71804bbf9d2eb83",
+      "bytes": 38874
+    },
+    {
+      "role": "contract_reference",
+      "source": "vlc-system-matlab/src/scripts/alarm-care-pro/mae_frontend.m",
+      "snapshot": "vlc-system-matlab/src/scripts/alarm-care-pro/mae_frontend.m.reference",
+      "sha256": "ebab1ecba1f71e5472df1b0ef9f169c9118e1ebc4f193eae9d8c0f67375ab52d",
+      "bytes": 12654
+    },
+    {
+      "role": "contract_reference",
+      "source": "vlc-system-matlab/src/scripts/alarm-care-pro/mae_frame.m",
+      "snapshot": "vlc-system-matlab/src/scripts/alarm-care-pro/mae_frame.m.reference",
+      "sha256": "376fee68a8c4ecce48bf09fce00e611ad94e94bf3a80dc18ee26db111b128af2",
+      "bytes": 7720
+    },
+    {
+      "role": "contract_reference",
+      "source": "vlc-system-matlab/src/scripts/alarm-care-pro/mae_registry.m",
+      "snapshot": "vlc-system-matlab/src/scripts/alarm-care-pro/mae_registry.m.reference",
+      "sha256": "d96a35836218ed58055900fac24a377fb7dc1c8517dff73992cc25f26afa7fad",
+      "bytes": 5252
+    },
+    {
+      "role": "parser_reference",
+      "source": "vlc-system-matlab/src/scripts/alarm-care-pro/mae_handlers.m",
+      "snapshot": "vlc-system-matlab/src/scripts/alarm-care-pro/mae_handlers.m.reference",
+      "sha256": "6fcbbc4346c9e9ffca0e7ba1e42732ac211b72cec87f9ce90fcf3187b90a1069",
+      "bytes": 12557
+    },
+    {
+      "role": "sync_reference",
+      "source": "vlc-system-matlab/src/main/model/utils/SignalUtils.m",
+      "snapshot": "vlc-system-matlab/src/main/model/utils/SignalUtils.m.reference",
+      "sha256": "8a4800c011d8e3b447bf25c4bdd40eddaf7311460a09a2b251048508a8b83e0e",
+      "bytes": 5564
+    },
+    {
+      "role": "contract_reference",
+      "source": "alarm-care-pro-backend/src/gateway_server.ts",
+      "snapshot": "alarm-care-pro-backend/src/gateway_server.ts.reference",
+      "sha256": "f3e40b5e17ef19a5c92f0b687155b074d59b45ae48af0dcbe5430cf2171d7e2b",
+      "bytes": 1260
+    },
+    {
+      "role": "contract_reference",
+      "source": "alarm-care-pro-backend/src/services/TcpGateway.ts",
+      "snapshot": "alarm-care-pro-backend/src/services/TcpGateway.ts.reference",
+      "sha256": "6f1e6824b28598ae971fd8e51dc1939422de1fcc7a2c709459e8e8021c59dfe6",
+      "bytes": 3265
+    },
+    {
+      "role": "contract_reference",
+      "source": "alarm-care-pro-backend/src/services/SocketServer.ts",
+      "snapshot": "alarm-care-pro-backend/src/services/SocketServer.ts.reference",
+      "sha256": "9a138d8cfb07bbca56518068a7fd5413a4e5a219a89eda606796a1e910eb1369",
+      "bytes": 1932
+    },
+    {
+      "role": "contract_reference",
+      "source": "alarm-care-pro-frontend/src/pages/Home.tsx",
+      "snapshot": "alarm-care-pro-frontend/src/pages/Home.tsx.reference",
+      "sha256": "ac833eba6bb2a34c0509c30600d736459f0271c936ead5cc3a3053166bca8b80",
+      "bytes": 5516
+    },
+    {
+      "role": "contract_reference",
+      "source": "alarm-care-pro-frontend/src/utils/monitorVariables.ts",
+      "snapshot": "alarm-care-pro-frontend/src/utils/monitorVariables.ts.reference",
+      "sha256": "6d2552a6bdeaf2f6e87a22ef49024a4b5968b8d34852a09dea8e8fda9a2fa512",
+      "bytes": 2436
+    },
+    {
+      "role": "contract_reference",
+      "source": "alarm-care-pro-frontend/src/contexts/AlarmsContext.tsx",
+      "snapshot": "alarm-care-pro-frontend/src/contexts/AlarmsContext.tsx.reference",
+      "sha256": "093cb5b762297cceb64019fcdf5d446415f384757dcc21cbb70d63b02ae4f429",
+      "bytes": 6828
+    }
+  ],
+  "warning": "Reference copies only. No integration applied. Never add reference/ to MATLAB path."
+}

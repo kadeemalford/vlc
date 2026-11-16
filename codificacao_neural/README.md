@@ -10,6 +10,14 @@ bancada de pesquisa. Ventilador, bombas, alarmes e demais variáveis não integr
 a proposta ativa. No sensor de dedo, confirmar **PR**, sem confundi-la com **HR
 do ECG**. Ver [MONITOR.md](MONITOR.md) para a captura TCP isolada.
 
+**Objetivo final em 16/11/2026:** integrar o codec ao sistema completo MATLAB →
+gateway/backend → painel em `medical_telemetry_system/`, depois de ampliar a validação
+isolada. Preparação sem alterações ativas:
+[`neural_codification_changes`](../medical_telemetry_system/neural_codification_changes/README.md).
+Não acrescentar o `src/main` das duas versões MATLAB ao mesmo path: têm classes
+homônimas e sincronizadores diferentes. Para os testes isolados, manter a versão
+do protótipo já utilizada; as cópias `.reference` não são código de execução.
+
 **Não é criptografia comprovada.** Não há chave, autenticação ou adversário neste
 protótipo. O controle sem decoder demonstra incompatibilidade de representação,
 não impossibilidade de recuperação por terceiros. Pesos, arquitetura e formato
@@ -28,12 +36,13 @@ Resultados efetivamente executados: [demo offline](reports/offline_demo_20261109
 | Autoencoder MLP com latentes binários e serialização | Implementado e testado em Python |
 | Reconstrução exata do alfabeto de 256 bytes | Verificada offline, seeds 42/43/44 |
 | Framing, CRC, fragmentação, identificação de modelo | Implementados e testados |
-| Decoder de capturas MATLAB alinhadas e aceitas | Testado offline; usuário relatou dois roundtrips físicos exatos, artefatos ainda não conferidos aqui |
+| Decoder de capturas MATLAB alinhadas e aceitas | Usuário relatou dois roundtrips sintéticos e um PR real exatos; artefatos ainda não conferidos aqui |
 | Controle sem decoder | Implementado; não é teste de segurança |
 | Exportação MATLAB da mensagem compacta | Implementada; usuário relatou testes MATLAB aprovados |
 | Replay MATLAB de um pacote pelos instrumentos abertos | Usuário relatou sucesso em 09 e 10/11/2026 com mensagem sintética |
-| Coletor TCP isolado do monitor | Implementado; testes de framing/parser aprovados; validação presencial pendente |
-| Integração monitor → VLC online | Não implementada; captura e replay continuam separados |
+| Coletor TCP isolado do monitor | Usuário confirmou recepção ao vivo e captura de PR=59 bpm em 10/11 |
+| Replay de leitura real pelo VLC | Usuário confirmou reconstrução exata de `!#MDPR0059`, 10 bytes, pacote de 392 bits |
+| Integração monitor → VLC → backend/painel online | Primeira implementação opt-in em `live_bridge.py` + `run_neural_monitor.m`; testes Python aprovados, validação MATLAB/Windows/Web pendente |
 | Preâmbulo/receptor independente de TX | Não implementados; replay usa alinhamento assistido |
 | Segurança de camada física/criptografia | Não demonstradas, fora do ensaio mínimo |
 
@@ -72,6 +81,11 @@ compressão. `transmitted_bits` não inclui duração de upload, repetição AFG
 futuros preâmbulos/FEC. Repetir waveform no AFG não aumenta mensagens entregues.
 
 ## Instalação e testes sem instrumentos
+
+Para a nova integração online PR-only, ver
+[LIVE_INTEGRATION.md](../medical_telemetry_system/neural_codification_changes/LIVE_INTEGRATION.md).
+Ela usa Python persistente e o PHY verificado do protótipo; não ativa o
+orquestrador antigo nem seus comandos. Importar `live_bridge` não abre sockets.
 
 Manter o clone completo, incluindo `equalizador_neural/`, `equalizador_neural_2/`
 e o legado. Python 3.10+ com NumPy, SciPy e PyTorch CPU. No PowerShell, a partir

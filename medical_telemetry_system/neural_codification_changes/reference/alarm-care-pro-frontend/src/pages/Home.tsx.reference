@@ -1,0 +1,145 @@
+import { type Socket } from 'socket.io-client';
+import { useEffect, useReducer, useRef } from 'react';
+
+import { PanelHeader } from '../components/PanelHeader';
+import { VariableCard } from '../components/VariableCard';
+
+import { type MonitorData } from '../types/monitor';
+
+import { Header } from '../components/Header';
+import { VentilatorPanel } from '../components/VentilatorPanel';
+import { BombsPanel } from '../components/BombsPanel';
+import UpdatedAtFormattedDate from '../utils/UpdatedAtFormattedDate';
+import { INACTIVE_THRESHOLD_MS } from '../utils/configs';
+import StateIndicator from '../components/StateIndicator';
+import { initialMonitorState, monitorReducer } from '../utils/monitorReducer';
+
+interface HomeProps {
+  socket: Socket;
+}
+
+function Home({ socket }: HomeProps) {
+  const [monitorState, dispatch] = useReducer(
+    monitorReducer,
+    initialMonitorState
+  );
+
+  const lastMonitorMessageAt = useRef<number | null>(null);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (
+        lastMonitorMessageAt.current !== null &&
+        Date.now() - lastMonitorMessageAt.current > 5000
+      ) {
+        dispatch({ type: 'inactive' });
+      }
+    }, INACTIVE_THRESHOLD_MS);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const onMonitorMessage = (data: MonitorData) => {
+      console.log(data)
+      lastMonitorMessageAt.current = Date.now();
+      dispatch({ type: 'monitor_message', data });
+    };
+
+    socket.on('monitor_message', onMonitorMessage);
+
+    return () => {
+      socket.off('monitor_message', onMonitorMessage);
+    };
+  }, [socket]);
+
+  return (
+    <div className='flex flex-col flex-1 w-[100vw] h-[100vh] items-center justify-center'>
+      <div className='w-[1126px]'>
+        <Header />
+
+        <div className='flex flex-col w-[100%] rounded-md'>
+          <PanelHeader />
+
+          <div className='flex w-[100%] h-[386px] rounded-md justify-between mb-[6px]'>
+            {/* Seção do monitor de sinais vitais */}
+            <div className='flex flex-col px-[46px] py-[25px] w-[560px] h-[100%] rounded-md bg-white'>
+              {/*<h1 className='text-[1.125rem] font-bold text-[black] mb-[16px]'>
+                Monitor de sinais vitais - Prolife PRO 12®
+              </h1>*/}
+
+              <div className='relative flex justify-center flex-col gap-1 items-center text-center w-[100%] text-[1.125rem] font-bold text-[black] mb-[16px]'>
+                <h1 className='flex  text-center flex-row items-center '>
+                  <StateIndicator state={monitorState.state} />
+                  Monitor de sinais vitais - Prolife PRO 12®
+                </h1>
+
+                <div className=''>
+                  {' '}
+                  {UpdatedAtFormattedDate(monitorState.updated_at) && (
+                    <p className='text-[12px] font-normal ml-1'>
+                      Atualizado{' '}
+                      {UpdatedAtFormattedDate(monitorState.updated_at)}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className='flex items-center justify-center w-[100%] h-[100%]'>
+                <div className='grid grid-cols-3 gap-2'>
+                  <VariableCard
+                    name='Freq cardíaca ECG'
+                    value={monitorState['Ecg Heart Rate'].value}
+                    unit={monitorState['Ecg Heart Rate'].unit}
+                  />
+                  <VariableCard
+                    name='Sat O2 Oximetro'
+                    value={monitorState['Puls Oxim Sat O2'].value}
+                    unit={monitorState['Puls Oxim Sat O2'].unit}
+                  />
+                  <VariableCard
+                    name='Taxa de pulso oximetro'
+                    value={monitorState['Puls Oxim Puls Rate'].value}
+                    unit={monitorState['Puls Oxim Puls Rate'].unit}
+                  />
+                  <VariableCard
+                    name='Taxa de respiração TThor'
+                    value={monitorState['Tthor Resp Rate'].value}
+                    unit={monitorState['Tthor Resp Rate'].unit}
+                  />
+                  <VariableCard
+                    name='Temperatura'
+                    value={monitorState['Temp'].value}
+                    unit={monitorState['Temp'].unit}
+                  />
+                  <VariableCard
+                    name='Pressão arterial'
+                    value={monitorState['Systolic Pressure'].value}
+                    unit={monitorState['Systolic Pressure'].unit}
+                    denominator={monitorState['Diastolic Pressure'].value}
+                    ratio={true}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Seção das bombas de infusão */}
+            <div className='flex flex-col px-[46px] py-[25px] w-[560px] h-[100%] rounded-md bg-white text-[black]'>
+              <h1 className='text-[1.125rem] font-bold text-[black] mb-[16px]'>
+                Bombas de infusão - Samtronic Icatu 4.0®
+              </h1>
+
+              {/* Lista de bombas */}
+              <BombsPanel socket={socket} />
+            </div>
+          </div>
+
+          {/* Seção do ventilador mecânico pulmonar */}
+          <VentilatorPanel socket={socket} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export { Home };

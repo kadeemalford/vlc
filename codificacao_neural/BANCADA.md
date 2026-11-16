@@ -1,8 +1,10 @@
 # Etapas presenciais — proposta 6
 
 **Estado em 10/11/2026:** usuário relatou testes MATLAB aprovados e reconstrução
-física exata da mensagem sintética em duas sessões. Artefatos não conferidos aqui
-ainda. Fonte real do monitor é a próxima etapa, conforme [MONITOR.md](MONITOR.md).
+física exata da mensagem sintética em duas sessões e de uma leitura real PR=59 bpm.
+Artefatos não conferidos aqui ainda. Em 16/11, ampliar a repetibilidade isolada
+antes de integrar ao sistema completo. Ver [ROADMAP.md](ROADMAP.md) e
+[`plano de integração`](../medical_telemetry_system/neural_codification_changes/VALIDATION_PLAN.md).
 Não continuar automaticamente uma sessão anterior: conferir montagem, alimentação, conexão e limites atuais.
 Não reutilizar configurações históricas como medições presentes.
 
@@ -38,8 +40,8 @@ por `workflow.py encode`. Uma captura por pacote do manifesto; não truncar mens
 para caber. Treino do alfabeto não precisa de dados de pacientes.
 
 Usar `monitor_capture.py --listen`, sem executar o sistema legado completo,
-que pode habilitar AFG e comandos do gateway. O coletor novo ainda precisa de
-validação presencial. Ele não envia ACK HL7; registrar caso o monitor o exija.
+que pode habilitar AFG e comandos do gateway. O coletor foi testado ao vivo
+segundo o usuário. Ele não envia ACK HL7; registrar caso o monitor o exija.
 
 ## 3. Conferir bancada e adquirir um pacote
 

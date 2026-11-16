@@ -1,0 +1,227 @@
+import React, { createContext, useEffect, useState } from 'react';
+import { VentilatorAlarm } from '../types/ventilator';
+import { BombAlarm } from '../types/bomb';
+import { Socket } from 'socket.io-client';
+
+import { sortVentilatorAlarmsByPriority } from '../utils/sortVentilatorAlarmsByPriority';
+
+interface UpdateBombAlarmParams {
+  index: number;
+  alarm: BombAlarm;
+}
+
+interface AlarmsContextData {
+  ventilatorAlarms: VentilatorAlarm[];
+  bombAlarms: BombAlarm[];
+  bombSilence: boolean[];
+  updateBombAlarms(params: UpdateBombAlarmParams): void;
+  toggleBombSilence(index: number): void;
+  addVentilatorAlarm(alarm: VentilatorAlarm): void;
+  removeVentilatorAlarm(alarmId: string): void;
+}
+
+interface AlarmsContextProps {
+  children: React.ReactNode;
+  socket: Socket;
+}
+
+const AlarmsContext = createContext<AlarmsContextData>({} as AlarmsContextData);
+
+function AlarmsContextProvider({ children, socket }: AlarmsContextProps) {
+  const [bombAlarms, setBombAlarms] = useState<BombAlarm[]>([
+    {
+      pumpSerialNumber: '',
+      cod: -1,
+      message: '',
+      state: 'INACTIVE',
+      updatedAt: undefined,
+    },
+    {
+      pumpSerialNumber: '',
+      cod: -1,
+      message: '',
+      state: 'INACTIVE',
+      updatedAt: undefined,
+    },
+    {
+      pumpSerialNumber: '',
+      cod: -1,
+      message: '',
+      state: 'INACTIVE',
+      updatedAt: undefined,
+    },
+    {
+      pumpSerialNumber: '',
+      cod: -1,
+      message: '',
+      state: 'INACTIVE',
+      updatedAt: undefined,
+    },
+    {
+      pumpSerialNumber: '',
+      cod: -1,
+      message: '',
+      state: 'INACTIVE',
+      updatedAt: undefined,
+    },
+    {
+      pumpSerialNumber: '',
+      cod: -1,
+      message: '',
+      state: 'INACTIVE',
+      updatedAt: undefined,
+    },
+    {
+      pumpSerialNumber: '',
+      cod: -1,
+      message: '',
+      state: 'INACTIVE',
+      updatedAt: undefined,
+    },
+    {
+      pumpSerialNumber: '',
+      cod: -1,
+      message: '',
+      state: 'INACTIVE',
+      updatedAt: undefined,
+    },
+  ] as BombAlarm[]);
+  const [ventilatorAlarms, setVentilatorAlarms] = useState<VentilatorAlarm[]>(
+    []
+  );
+
+  // estado dos switches de silenciamento de cada bomba de infusão.
+  // fica no contexto para que o envio do comando de silenciamento possa
+  // consultar o valor no local mais adequado (onde o socket é utilizado).
+  const [bombSilence, setBombSilence] = useState<boolean[]>(
+    Array(bombAlarms.length).fill(false)
+  );
+
+  const [loading, setLoading] = useState(true);
+
+  // atualiza o alarme de uma bomba em específico
+  const updateBombAlarms = ({ index, alarm }: UpdateBombAlarmParams) => {
+    let bombAlarmsCopy = bombAlarms;
+    bombAlarmsCopy[index] = alarm;
+    setBombAlarms(bombAlarmsCopy);
+  };
+
+  // liga/desliga o silenciamento dos alarmes de uma bomba específica
+  const toggleBombSilence = (index: number) => {
+    setBombSilence((current) => {
+      const copy = [...current];
+      copy[index] = !copy[index];
+      return copy;
+    });
+  };
+
+  // remoção de um alarme da lista de alarmes ativos no ventilador mecânico
+  const removeVentilatorAlarm = (alarmId: string) => {
+    setVentilatorAlarms((current) =>
+      current.filter((alarm) => alarm.id != alarmId)
+    );
+  };
+
+  // adiciona um alarme à lista de alarmes ativos no ventilador mecanico
+  const addVentilatorAlarm = (alarm: VentilatorAlarm) => {
+    const alarmAlreadyInList = ventilatorAlarms.find(
+      (current) => current.id == alarm.id
+    );
+
+    if (!alarmAlreadyInList) {
+      let newAlarms = ventilatorAlarms;
+      newAlarms.push(alarm);
+
+      // ordena a lista de alarmes do ventilador para dar preferência aos alarmes com prioridade alta (HI)
+      newAlarms = sortVentilatorAlarmsByPriority(newAlarms);
+      setVentilatorAlarms(newAlarms);
+    }
+  };
+
+  useEffect(() => {
+    setLoading(false);
+  }, []);
+
+  // cada vez que um dos alarmes for alterado é feita a checagem de alarmes do ventilador, caso haja algum alarme
+  // do ventilador ativo, todas as bombas são silenciadas e caso contrário todas têm os alarmes reativados
+  useEffect(() => {
+    if (ventilatorAlarms.length != 0) {
+      try {
+        socket && socket.emit('silent_bomb1', bombAlarms[0].pumpSerialNumber);
+        socket && socket.emit('silent_bomb2', bombAlarms[1].pumpSerialNumber);
+        socket && socket.emit('silent_bomb3', bombAlarms[2].pumpSerialNumber);
+        console.log('Silenciar bombas');
+      } catch (err) {
+        console.log(err);
+      }
+    } else {
+      try {
+        socket && socket.emit('refresh_bomb1', bombAlarms[0].pumpSerialNumber);
+        socket && socket.emit('refresh_bomb2', bombAlarms[1].pumpSerialNumber);
+        socket && socket.emit('refresh_bomb3', bombAlarms[2].pumpSerialNumber);
+        console.log('Reiniciar bombas');
+      } catch (err) {
+        console.log(err);
+      }
+    }
+
+    console.log('Atualização dos alarmes');
+  }, [bombAlarms, ventilatorAlarms]);
+
+  // envia o comando de silenciamento a cada 1 segundo para as bombas cujo
+  // interruptor de silenciamento esteja ligado (ON) e o comando de refresh do
+  // alarme para as bombas cujo interruptor esteja desligado (OFF)
+  useEffect(() => {
+    const silentInterval = setInterval(() => {
+      bombSilence.forEach((isSilent, index) => {
+        const pumpSerialNumber = bombAlarms[index]?.pumpSerialNumber;
+
+        // só envia o comando se houver uma bomba conectada (com nº de série)
+        if (!socket || !pumpSerialNumber) return;
+
+        try {
+          if (isSilent) {
+            socket.emit(`silent_bomb${index + 1}`, pumpSerialNumber);
+            console.log(
+              `Comando de silenciamento enviado para a bomba ${index + 1}`
+            );
+          } else {
+            socket.emit(`refresh_bomb${index + 1}`, pumpSerialNumber);
+            console.log(
+              `Comando de refresh do alarme enviado para a bomba ${index + 1}`
+            );
+          }
+        } catch (err) {
+          console.log(err);
+        }
+      });
+    }, 1000);
+
+    return () => clearInterval(silentInterval);
+  }, [bombSilence, bombAlarms, socket]);
+
+  if (loading)
+    return (
+      <div className='flex h-[100vh] w-[100vw] items-center justify-center'>
+        <h1>loading</h1>
+      </div>
+    );
+
+  return (
+    <AlarmsContext.Provider
+      value={{
+        updateBombAlarms,
+        bombAlarms,
+        bombSilence,
+        toggleBombSilence,
+        removeVentilatorAlarm,
+        ventilatorAlarms,
+        addVentilatorAlarm,
+      }}
+    >
+      {children}
+    </AlarmsContext.Provider>
+  );
+}
+
+export { AlarmsContextProvider, AlarmsContext };

@@ -12,7 +12,71 @@ O termo “criptografia” é motivação/extensão, não conclusão: falta chav
 ameaça/avaliação de segurança. Bypass do decoder mede representação, não sigilo.
 Não chamar o protótipo mínimo de código wiretap ou autoencoder de camada física.
 
-## Atualização vigente — 10/11/2026
+## Atualização vigente — 16/11/2026
+
+### Após retomada presencial e autorização para integrar
+
+- Usuário relatou roundtrip sintético de 19 bytes e replay PR=59 exatos na sessão
+  `neural_20261116_141350`; nova PR=70 coincidiu com o display e foi registrada em
+  `data/monitor_pr_20261116_143727/`, fonte SHA-256
+  `b3a04d3de1ca3e3a35be83643a0c1a55de1c2a04a8814694e1543b5eeb05b1d3`.
+  Pacote ID 1002/392 bits, replay físico também exato conforme usuário.
+- Scores dos sintéticos: 0,9179/0,9241; PR antiga 0,9231; PR nova 0,8998.
+  AFG OFF confirmado ao final de cada captura; artefatos ainda não auditados aqui.
+- Bancada reconferida: 10 MS/s, 10k, CH1 AC/1 MΩ/500 mV/div; banda foi ajustada
+  de 100 para 20 MHz; AFG Arbitrary/Hi-Z/1 Vpp/offset zero.
+- Classe antiga de `matosgabriel` estava em memória apesar do `which` correto;
+  usuário removeu path/adaptador e descarregou classes pontuais preservando VISA.
+- Usuário pediu iniciar integração sem prolongar a série isolada. Implementados
+  `live_bridge.py` e entrypoint `neural_codification_changes/matlab/run_neural_monitor.m`:
+  PR-only, Python persistente, PHY do protótipo, NC1/CRC, latest-only/idade, NDJSON
+  para gateway local. Não altera nem inicia UI/orquestrador legado.
+- 26 testes Python codec/coletor/bridge aprovados (11 novos). Sockets sintéticos
+  em loopback; não equivalem a MATLAB, gateway Node/React ou integração física.
+  Procedimento em `neural_codification_changes/LIVE_INTEGRATION.md`.
+- Próximo passo vigente: transferir fontes novos ao PC e conferir `version`/`pyenv`;
+  validar conversões MATLAB↔Python antes da ativação manual de gateway e transmissão.
+- Compatibilidade recebida: MATLAB R2021a e venv Python 3.13.0/PyTorch 2.15.0+cpu.
+  API `pyenv` não suporta essa combinação. Adaptados runner e ponte para IPC JSON
+  loopback com processo externo persistente (`live_bridge_server.py` +
+  `NeuralBridgeClient.m`), mantendo venv/modelo. Próxima ação: transferir arquivos
+  e executar somente handshake IPC, AFG OFF, sem monitor/gateway/VISA no teste.
+
+### Preparação anterior da integração (histórico desta data)
+
+- Objetivo final: integrar encoder/decoder ao sistema completo em
+  `medical_telemetry_system/`, preservando NDJSON/gateway/painel. A primeira fonte
+  continua sendo somente uma taxa HR/PR do monitor. Não ativar controle médico.
+- Criada área de preparação `medical_telemetry_system/neural_codification_changes/`:
+  17 snapshots de fontes com hashes, mapa por arquivo, contrato e validação.
+  Fontes ativos não alterados; não é integração pronta para instalar.
+- Descobertas: versão completa tem `start/tick/stop`, UIs MATLAB, batching, fila
+  limitada, retries e sync diferente do piloto. Precisam de auditoria/adaptação.
+  Não adicionar paths das duas versões ao mesmo tempo: classes/funções homônimas.
+- Snapshots conferidos contra os fontes originais: 17/17. Testes offline nesta
+  atualização: 5 do pacote + 15 do codec/coletor + 47/6 dos equalizadores aprovados.
+  Nenhum app/gateway/UI, equipamento médico ou instrumento iniciado nesta etapa.
+- Usuário relatou validação ao vivo do coletor MLLP: 118 mensagens em 60 s,
+  59 observações HR e 59 PR, sem erros de framing ou rejeição sintática.
+- Capturou PR=59 bpm, coincidente com o display, em
+  `data/monitor_pulse_01/monitor_000001.bin` (`!#MDPR0059`, 10 bytes).
+  Fonte SHA-256 `047a8d376f2497bd24b7379559a6c774ed330d669cb727859ff47c8631729155`.
+- Modelo Windows congelado SHA-256
+  `f83712964339612bbc4011590062fd05445e1cd9d0380e1e09ee00ed9c7ff0bf`,
+  diferente do arquivo de modelo Linux do demo. Não substituir/retreinar.
+- Pacote real message_id=1001, 392 bits; captura
+  `data/physical/neural_20261110_161357/neural_20261110_161357_monitor_pr_1001.mat`,
+  sync Pearson 0,9170. Usuário confirmou reconstrução física completa, 10 bytes
+  idênticos, zero erros de bytes observados, em `runs/physical_monitor_pr_1001/`.
+  Artefatos ainda não recebidos/auditados localmente. Não inferir BER dos bits,
+  generalização, sigilo ou integração online deste único resultado.
+- Sugerido backup e `checkpoint_real_monitor.mat`, não confirmados por inspeção
+  de arquivos. Na retomada, verificar presença/modelo/sessão sem presumir backup.
+- Próxima etapa: conferir setup do osciloscópio com AFG OFF, repetir referência
+  sintética e depois ampliar teste isolado de PR. Integração fica posterior aos
+  portões definidos no pacote de revisão.
+
+## Atualização — 10/11/2026 (histórico anterior ao teste real)
 
 - Usuário restringiu a fonte ao monitor de frequência cardíaca/pulso de pesquisa;
   demais equipamentos, variáveis e alarmes estão fora da proposta ativa.
@@ -66,23 +130,25 @@ Comando verificado a partir desta pasta:
 
 ## Próxima ação
 
-1. Transferir novos fontes/testes ao PC da bancada; não retreinar o codec já validado.
-2. Conferir IPv4 da interface local e destino de envio do monitor (porta 2222).
-3. Executar inspeção MLLP com AFG OFF, observar HR/PR e qualidade/contato no display.
-4. Exportar uma observação inteira válida da taxa selecionada em pasta nova.
-5. Codificar o `.bin` real com o modelo congelado; transmitir pacote(s) pelo VLC
-   numa captura identificada como fonte real, separada da referência sintética.
-6. Decodificar sem `--ideal`, conferir bytes e valor contra a origem e registrar
-   todas as tentativas. Só depois ampliar sessões e eventualmente integrar online.
+1. Conferir fonte/modelo/capturas/backups e sessão VISA existente antes de reabrir.
+2. Conferir setup atual com AFG OFF; registrar divergências em vez de pressupor
+   os 100 ns, 10k e 500 mV/div históricos.
+3. Repetir referência sintética em ID de sessão novo. Depois ampliar piloto de
+   PR/HR de origem real, preservando toda tentativa e a distinção replay/online.
+4. Receber e auditar MATs/manifests/modelo/resultados; calcular BER dos bits e
+   contagens de entrega, não apenas igualdade entre fontes reconstruídas aceitas.
+5. Seguir os portões do pacote de integração: adaptador offline, contrato com
+   gateway/painel em teste, depois monitor → VLC → painel online. Nada aplicado ainda.
 
 ## Pendências explícitas
 
-- Coletor TCP implementado mas não validado ao vivo; falta integração monitor →
-  codec → VLC online. Autenticação, FEC/retransmissão, preâmbulo público/receptor
+- Coletor TCP e replay de leitura real validados ao vivo segundo usuário; falta
+  auditoria local dos artefatos e integração monitor → codec → VLC → painel online.
+  Autenticação, FEC/retransmissão, preâmbulo público/receptor
   sem TX, UI e métricas agregadas de campanha não prontos.
 - Nenhum ganho de compressão/superioridade ou segurança demonstrados.
-- Roundtrips físicos sintéticos relatados pelo usuário, ainda sem auditoria local
-  dos arquivos; nenhuma transmissão de fonte real confirmada até esta atualização.
+- Roundtrips físicos sintéticos e um PR real relatados pelo usuário, ainda sem
+  auditoria local dos arquivos; não confundir relato operacional com campanha auditada.
 - Latentes binários não são ciphertext criptograficamente seguro.
 - CRC/fingerprint não provam autenticidade. Bit erros podem causar perda do quadro inteiro.
 - Fidelidade é contra a mensagem compacta; lacunas/arredondamentos do parser permanecem.

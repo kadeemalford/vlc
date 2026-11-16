@@ -5,3 +5,9 @@
 *.json
 *.csv
 *.zip
+*.rar
+/medical_telemetry_system
+# Keep the imported legacy applications ignored; version only the review bundle.
+!/medical_telemetry_system/
+/medical_telemetry_system/*
+!/medical_telemetry_system/neural_codification_changes/

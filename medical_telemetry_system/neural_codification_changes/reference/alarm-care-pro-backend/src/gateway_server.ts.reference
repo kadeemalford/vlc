@@ -1,0 +1,32 @@
+import 'dotenv/config';
+import http from 'http';
+import app from 'express';
+import { SocketServer } from './services/SocketServer';
+import { TcpGateway } from './services/TcpGateway';
+
+const PORT = 4444;
+
+// Servidor dedicado ao caminho MATLAB <-> Frontend.
+// NÃO abre servidores TCP para equipamentos médicos (isso fica a cargo do
+// app MATLAB); apenas expõe o socket.io para o frontend (porta 4444) e o
+// gateway TCP (porta 4455), que faz a ponte nos dois sentidos:
+//   downlink: NDJSON do real_time_mae_vlc() -> EventBus -> SocketServer -> frontend
+//   uplink:   comando do frontend (silent_bombN/refresh_bombN) -> EventBus ->
+//             TcpGateway -> real_time_mae_vlc(), que escreve direto no socket
+//             do equipamento, sem passar pelo canal VLC.
+
+// Inicializa HTTP
+const httpServer = http.createServer(app);
+
+// Inicializa WebSocket (frontend)
+new SocketServer(httpServer);
+
+// Gateway TCP bidirecional: dados do MATLAB e comandos do frontend
+const gatewayPort = Number(process.env.GATEWAY_PORT) || 4455;
+const tcpGateway = new TcpGateway(gatewayPort);
+tcpGateway.listen();
+
+// Inicia o servidor principal
+httpServer.listen(PORT, () => {
+  console.log(`Gateway server running at ${PORT}! 🚀`);
+});

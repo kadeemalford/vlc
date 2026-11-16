@@ -1,0 +1,121 @@
+﻿classdef SignalUtils
+    methods(Static)
+        function normalizedSig = normalizeSignal(signal)
+            maxAmp = (max(abs(signal.getSamples())));
+            normalizedSig = Signal(signal.getSamples()/maxAmp, signal.getTimes(), signal.getSampleRate());
+        end 
+
+        function plot(signal)
+            plot(signal.getTimes(), signal.getSamples());
+        end
+
+        function signal = sumSignals(signal1, signal2)
+            if(signal1.getSampleRate() ~= signal2.getSampleRate())
+                ME = MException('SignalUtils:sumSignals', ...
+                    "The signals should have the same sample rate");
+                throw(ME);
+            end
+            if(signal1.getLength() == 0)
+                signal = Signal(signal2.getSamples(), signal2.getTimes(), signal2.getSampleRate());
+            elseif(signal2.getLength() == 0)
+                signal = Signal(signal1.getSamples(), signal1.getTimes(), signal1.getSampleRate());
+            else
+                samples = signal1.getSamples() + signal2.getSamples();
+                signal = Signal(samples, signal1.getTimes(), signal1.getSampleRate());
+            end
+            
+        end
+        
+        function times = generateTimes(signal)
+            times = 0:1/signal.getSampleRate():((signal.getLength()-1)/signal.getSampleRate());
+        end
+
+        % this method create a new signal based in signal2 to match the sample rate of signal1
+        function newSignal = resampleSignalToMatchSampleRate(signal1, signal2)
+            [P1, Q1]    = rat(signal1.getSampleRate()/signal2.getSampleRate()); 
+            newSamples = resample(signal2.getSamples(), P1, Q1); 
+            newSampleRate = signal1.getSampleRate();
+            times = 0:1/newSampleRate:((length(newSamples)-1)/newSampleRate);
+            
+            newSignal = Signal(newSamples, times, newSampleRate);
+            
+        end
+        
+        function syncSignal = synchronizeSignals(signal1, signal2)
+            % Fix [sync-1]: substituiu alignsignals() por xcorr com mascara de
+            % shifts validos. O alignsignals retornava shift < 0 ou escolhia o
+            % segundo pico de correlacao quando o AFG repetia ~2x na janela do
+            % scope (frame de 472 us em janela de 1 ms), causando falha
+            % intermitente a 10 MS/s / 10k pontos. A nova logica busca o pico
+            % de correlacao de maior amplitude DENTRO dos shifts geometricamente
+            % possiveis (0 <= shift <= len2 - len1), garantindo que o trecho
+            % extraido do RX esteja sempre dentro dos limites do buffer.
+
+            if(signal1.getSampleRate() ~= signal2.getSampleRate())
+                ME = MException('SignalUtils:synchronizeSignals', ...
+                    "The signals should have the same sample rate");
+                throw(ME);
+            end
+
+            s1 = signal1.getSamples();
+            s2 = signal2.getSamples();
+            len1 = length(s1);
+            len2 = length(s2);
+
+            % Margem geometrica: o trecho de len1 amostras deve caber em s2.
+            % Shifts fora de [0, len2-len1] produziriam indexacao out-of-bounds.
+            maxValidShift = len2 - len1;
+            if maxValidShift < 0
+                ME = MException('SignalUtils:synchronizeSignals', ...
+                    "RX signal shorter than TX signal; cannot synchronize");
+                throw(ME);
+            end
+
+            % Cross-correlacao completa com lags de -maxValidShift ate +maxValidShift.
+            % Somente lags >= 0 serao considerados (RX nao pode preceder TX no canal).
+            % Nota: 'normalized' exige vetores de mesmo comprimento; como s2 > s1
+            % usa-se 'none' e normaliza-se manualmente pelo produto das energias.
+            [xc, lags] = xcorr(s2, s1, maxValidShift, 'none');
+            normFactor = sqrt(sum(s1.^2) * sum(s2.^2));
+            if normFactor > 0
+                xc = xc / normFactor;
+            end
+
+            % Filtra somente lags no intervalo valido [0, maxValidShift].
+            % Lags negativos (s2 chegando antes de s1) sao descartados: fisicamente
+            % o RX nao pode preceder o TX no canal.
+            % Filtra somente lags no intervalo valido [0, maxValidShift].
+            validMask = (lags >= 0) & (lags <= maxValidShift);
+            if ~any(validMask)
+                ME = MException('SignalUtils:synchronizeSignals', ...
+                    "The signals could not be synchronized");
+                throw(ME);
+            end
+
+            % Extrai diretamente os valores absolutos da correlacao nos lags validos,
+            % zerando o que for invalido (para que abs() nunca veja -Inf!).
+            absXc = abs(xc);
+            absXc(~validMask) = 0;
+
+            % Pico de maxima correlacao dentro da janela valida.
+            [maxCorr, bestIdx] = max(absXc);
+            shift = round(lags(bestIdx));
+
+            shiftedSamples = s2(shift + 1 : shift + len1);
+
+            syncSignal = Signal();
+            syncSignal.setTimes(signal1.getTimes());
+            syncSignal.setSampleRate(signal1.getSampleRate());
+
+            % Correcao de inversao de fase: se a correlacao cruzada indica que
+            % o sinal esta invertido (RMS da diferenca > RMS da soma), inverte.
+            % motivation of this condition should be evaluated in the future
+            if rms(s1 - shiftedSamples) > rms(s1 + shiftedSamples)
+                syncSignal.setSamples(-shiftedSamples);
+            else
+                syncSignal.setSamples(shiftedSamples);
+            end
+
+        end
+    end
+end

@@ -1,0 +1,731 @@
+classdef TestEopSystemViewMae < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure                        matlab.ui.Figure
+        AFGendEditField                 matlab.ui.control.NumericEditField
+        AFGendEditFieldLabel            matlab.ui.control.Label
+        AFGstepEditField                matlab.ui.control.NumericEditField
+        AFGstepEditFieldLabel           matlab.ui.control.Label
+        AFGstartEditField               matlab.ui.control.NumericEditField
+        AFGstartEditFieldLabel          matlab.ui.control.Label
+        messageLabel                    matlab.ui.control.Label
+        SaveButton                      matlab.ui.control.Button
+        Mdo3012Lamp                     matlab.ui.control.Lamp
+        Mdo3012LampLabel                matlab.ui.control.Label
+        SimulationSwitch                matlab.ui.control.Switch
+        SimulationSwitchLabel           matlab.ui.control.Label
+        kSpsLabel                       matlab.ui.control.Label
+        SampleRateEditField             matlab.ui.control.EditField
+        SampleRateEditFieldLabel        matlab.ui.control.Label
+        BitRateEditField                matlab.ui.control.EditField
+        BitRateEditFieldLabel           matlab.ui.control.Label
+        NIterationEditField             matlab.ui.control.NumericEditField
+        NIterationEditFieldLabel        matlab.ui.control.Label
+        BitsperIterationEditField       matlab.ui.control.EditField
+        BitsperIterationEditFieldLabel  matlab.ui.control.Label
+        kHzLabel                        matlab.ui.control.Label
+        BandwidthEditField              matlab.ui.control.EditField
+        BandwidthEditFieldLabel         matlab.ui.control.Label
+        kbpsLabel                       matlab.ui.control.Label
+        StartButton                     matlab.ui.control.Button
+        UIAxesQFactor                   matlab.ui.control.UIAxes
+        UIAxesSignal                    matlab.ui.control.UIAxes
+        UIAxesEyeDiagram                matlab.ui.control.UIAxes
+        UIAxesProb                      matlab.ui.control.UIAxes
+    end
+
+    
+    properties (Access = private)
+        testEopSystemController
+        lastResponses
+        maeHandles
+        maeTimer
+        maeBusy logical = false
+        maeRunning logical = false
+        qTimeList
+        qValueList
+        plotEvery = 10
+    end
+    
+    methods (Access = public)
+        
+        function setViewInputs(app, ookParams)
+            app.BitRateEditField.Value = string(ookParams.bitRate/1e3); %
+            app.BandwidthEditField.Value = string(ookParams.bandwidth/1e3); %kHz
+            app.BitsperIterationEditField.Value = 'variável (frame clínico)';
+            app.BitsperIterationEditField.Tooltip = {'Tamanho do payload varia com o frame clínico'};
+            app.SampleRateEditField.Value = string(ookParams.txSampleRate/1e3); %kSps
+        end
+        
+        function updateSignalAxes(app, comResponse)
+            txSamples = comResponse.txSignal.getSamples();
+            txTimes =  comResponse.txSignal.getTimes();
+            rxSamples = comResponse.synchSignal.getSamples();
+            rxTimes =  comResponse.synchSignal.getTimes();
+            
+            nPlot = min([100, numel(txSamples), numel(rxSamples), numel(txTimes), numel(rxTimes)]);
+            if nPlot < 1
+                return;
+            end
+            % Reaproveita os Line objects: recriar linhas+legenda a cada
+            % atualizacao e caro e travava o timer do MAE.
+            txLine = findobj(app.UIAxesSignal, 'Tag', 'txSignal');
+            if isempty(txLine)
+                plot(app.UIAxesSignal, txTimes(1:nPlot), txSamples(1:nPlot), ...
+                    '-', 'Color', '#0072BD', 'LineWidth', 2, 'Tag', 'txSignal', ...
+                    'DisplayName', '\color{white} Transmitted Signal');
+                hold(app.UIAxesSignal, 'on');
+                plot(app.UIAxesSignal, rxTimes(1:nPlot), rxSamples(1:nPlot), ...
+                    '-', 'Color', '#EDB120', 'Tag', 'rxSignal', ...
+                    'DisplayName', '\color{white} Received Signal');
+                hold(app.UIAxesSignal, 'off');
+                legend(app.UIAxesSignal, 'color', [0 0 0]);
+            else
+                rxLine = findobj(app.UIAxesSignal, 'Tag', 'rxSignal');
+                set(txLine, 'XData', txTimes(1:nPlot), 'YData', txSamples(1:nPlot));
+                set(rxLine, 'XData', rxTimes(1:nPlot), 'YData', rxSamples(1:nPlot));
+            end
+            drawnow limitrate
+        end
+        
+        function updateEyeDiagramAxes(app, comResponse)
+            segments = comResponse.eyeDiagramSegments;
+            if isempty(segments)
+                return;
+            end
+            % Um unico objeto Line com NaN entre os segmentos. Plotar a matriz
+            % direto (plot(segments')) cria centenas de Line objects e leva
+            % dezenas de segundos no App Designer, travando o timer.
+            segLen = size(segments, 2);
+            xPad = [1:segLen, NaN];
+            X = repmat(xPad, size(segments, 1), 1).';
+            Y = [segments, nan(size(segments, 1), 1)].';
+            eyeLine = findobj(app.UIAxesEyeDiagram, 'Tag', 'eyeLine');
+            if isempty(eyeLine)
+                plot(app.UIAxesEyeDiagram, X(:), Y(:), 'Color', '#EDB120', 'Tag', 'eyeLine');
+            else
+                set(eyeLine, 'XData', X(:), 'YData', Y(:));
+            end
+            drawnow limitrate
+        end
+        function updateQFactorAxes(app, tList, qFactorList)
+            qLine = findobj(app.UIAxesQFactor, 'Tag', 'qLine');
+            if isempty(qLine)
+                plot(app.UIAxesQFactor, tList, qFactorList, 'Color', '#EDB120', 'Tag', 'qLine');
+                xlabel(app.UIAxesQFactor, 'Time (s)', 'Color', [0.9 0.9 0.9]);
+                ylabel(app.UIAxesQFactor, 'Q Factor', 'Color', [0.9 0.9 0.9]);
+            else
+                set(qLine, 'XData', tList, 'YData', qFactorList);
+            end
+            drawnow limitrate
+        end
+        
+        function updateProbAxes(app, comResponse)
+            mu1 = comResponse.qFactor.getMu1();
+            mu0 = comResponse.qFactor.getMu0();
+            sigma1 = comResponse.qFactor.getSigma1();
+            sigma0 = comResponse.qFactor.getSigma0();
+            q = comResponse.qFactor.getQ();
+            
+            x1 = linspace(0, max(comResponse.bit1Samples)+0.5, 50);
+            x0 = linspace(min(comResponse.bit0Samples)-0.5, 0, 50);
+            pdf1 = normpdf(x1, mu1, sigma1);
+            pdf0 = normpdf(x0, mu0, sigma0);
+            
+            gauss1 = findobj(app.UIAxesProb, 'Tag', 'gauss1');
+            if isempty(gauss1)
+                plot(app.UIAxesProb, pdf1, x1, 'b-', 'LineWidth', 2, ...
+                    'Color', '#0072BD', 'Tag', 'gauss1', ...
+                    'DisplayName', '\color{white} Gaussian 1'); % Gaussiana para bit 1
+                hold(app.UIAxesProb, 'on');
+                plot(app.UIAxesProb, pdf0, x0, 'r-', 'LineWidth', 2, ...
+                    'Color', '#A2142F', 'Tag', 'gauss0', ...
+                    'DisplayName', '\color{white} Gaussian 0'); % Gaussiana para bit 0
+                histogram(app.UIAxesProb, comResponse.bit1Samples, ...
+                    'Normalization', 'pdf', 'FaceColor', '#0072BD', ...
+                    'FaceAlpha', 0.5, 'Orientation', 'horizontal', ...
+                    'Tag', 'hist1', ...
+                    'DisplayName', '\color{white} Samples 1');
+                histogram(app.UIAxesProb, comResponse.bit0Samples, ...
+                    'Normalization', 'pdf', 'FaceColor', '#A2142F', ...
+                    'FaceAlpha', 0.5, 'Orientation', 'horizontal', ...
+                    'Tag', 'hist0', ...
+                    'DisplayName', '\color{white} Samples 0');
+                hold(app.UIAxesProb, 'off');
+                legend(app.UIAxesProb, 'color', [0 0 0]);
+            else
+                gauss0 = findobj(app.UIAxesProb, 'Tag', 'gauss0');
+                hist1 = findobj(app.UIAxesProb, 'Tag', 'hist1');
+                hist0 = findobj(app.UIAxesProb, 'Tag', 'hist0');
+                set(gauss1, 'XData', pdf1, 'YData', x1);
+                set(gauss0, 'XData', pdf0, 'YData', x0);
+                set(hist1, 'Data', comResponse.bit1Samples);
+                set(hist0, 'Data', comResponse.bit0Samples);
+            end
+            title(app.UIAxesProb, sprintf('OOK Level probability (Q = %.2f)', q), "Color", [0.9 0.9 0.9]);
+            ylim(app.UIAxesProb, ylim(app.UIAxesEyeDiagram));
+            drawnow limitrate
+        end
+        
+        function setErrorMassage(app, message)
+            app.messageLabel.Text = message;
+            app.messageLabel.FontColor = 'red';
+        end
+        
+        function setInfoMassage(app, message)
+            app.messageLabel.Text = message;
+            app.messageLabel.FontColor = 'white';
+            drawnow limitrate
+        end
+        
+        function clearMessage(app)
+            app.messageLabel.Text = "";
+        end
+        
+    end
+
+    methods (Access = private)
+
+        function startMae(app, demoMode, runNow)
+            try
+                app.startMaeServices(demoMode);
+                if runNow
+                    app.startMaeTimer();
+                end
+            catch ME
+                app.stopMaeTimer();
+                try
+                    real_time_mae_vlc('stop');
+                catch
+                end
+                app.maeHandles = [];
+                app.setErrorMassage(sprintf('Falha ao iniciar MAE: %s', ME.message));
+            end
+        end
+
+        function startMaeServices(app, demoMode)
+            opts = struct();
+            opts.demoMode = demoMode;
+            opts.analyzer = app.testEopSystemController.getTxAnalyzer();
+            opts.vlcSystem = app.testEopSystemController.getVlcSystem();
+            opts.parameters = app.testEopSystemController.getOokParameters();
+            opts.afgAmplitude = app.AFGstartEditField.Value;
+            opts.plotEvery = app.plotEvery;
+            app.maeHandles = real_time_mae_vlc('start', opts);
+            app.qTimeList = [];
+            app.qValueList = [];
+            app.lastResponses = [];
+        end
+
+        function startMaeTimer(app)
+            app.stopMaeTimer();
+            % Remove timers orfaos de execucoes anteriores. Sem isso, um
+            % timer 'MaeVlcTick' preso a uma instancia antiga continua
+            % disparando e gera "Unrecognized method ... onMaeTick".
+            staleTimers = timerfindall('Name', 'MaeVlcTick');
+            for k = 1:numel(staleTimers)
+                try
+                    stop(staleTimers(k));
+                    delete(staleTimers(k));
+                catch
+                end
+            end
+            app.maeTimer = timer( ...
+                'Name', 'MaeVlcTick', ...
+                'ExecutionMode', 'fixedSpacing', ...
+                'Period', 0.05, ...
+                'BusyMode', 'drop', ...
+                'TimerFcn', @(~,~) app.onMaeTick());
+            app.maeBusy = false;
+            app.maeRunning = true;
+            app.StartButton.Text = 'Stop';
+            start(app.maeTimer);
+            app.setInfoMassage('MAE continuo em execucao.');
+        end
+
+        function stopMaeTimer(app)
+            if ~isempty(app.maeTimer) && isvalid(app.maeTimer)
+                stop(app.maeTimer);
+                delete(app.maeTimer);
+            end
+            app.maeTimer = [];
+            app.maeBusy = false;
+            app.maeRunning = false;
+            if isvalid(app) && isvalid(app.StartButton)
+                app.StartButton.Text = 'Start';
+            end
+        end
+
+        function onMaeTick(app)
+            if ~isvalid(app) || app.maeBusy
+                return;
+            end
+            app.maeBusy = true;
+            try
+                result = real_time_mae_vlc('tick');
+                if result.didTx
+                    if ~result.syncOk || isempty(result.response)
+                        app.setErrorMassage(sprintf( ...
+                            'MAE msg %d: sincronizacao falhou (canal perdeu o frame)', ...
+                            result.iteration));
+                    else
+                        % Olho/Q/histogramas sao caros no MDO: so atualiza
+                        % nos frames em que o pipeline fez a avaliacao.
+                        if result.shouldPlot
+                            app.updateSignalAxes(result.response);
+                            app.updateEyeDiagramAxes(result.response);
+                            app.updateProbAxes(result.response);
+                            if ~isnan(result.qVal)
+                                app.qTimeList(end+1) = result.tSec;
+                                app.qValueList(end+1) = result.qVal;
+                                app.updateQFactorAxes(app.qTimeList, app.qValueList);
+                            end
+                            app.lastResponses = [app.lastResponses, result.response];
+                        end
+                        if ~isnan(result.qVal)
+                            qStr = sprintf('%.2f', result.qVal);
+                        elseif ~isempty(app.qValueList)
+                            % Q so e recalculado a cada plotEvery frames; entre
+                            % as avaliacoes mostra a ultima medida.
+                            qStr = sprintf('%.2f (ultimo)', app.qValueList(end));
+                        else
+                            qStr = 'n/a';
+                        end
+                        if isnan(result.ber)
+                            berVal = 0;
+                        else
+                            berVal = result.ber;
+                        end
+                        app.setInfoMassage(sprintf( ...
+                            'MAE msg %d | t=%.1fs | BER=%.2e | Q=%s', ...
+                            result.iteration, result.tSec, berVal, qStr));
+                    end
+                end
+                drawnow limitrate
+            catch ME
+                app.setErrorMassage(ME.message);
+            end
+            if isvalid(app)
+                app.maeBusy = false;
+            end
+        end
+
+    end
+    
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Code that executes after component creation
+        function startupFcn(app)
+            % src/main: sobe de .../src/main/view/alarm-care-pro ate .../src/main
+            srcMainPath = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+            % raiz do repositorio: .../src/main -> .../src -> raiz
+            projectPath = fileparts(fileparts(srcMainPath));
+            
+            % scripts do MAE (real_time_mae_vlc) + classes de src/main.
+            % Nao usar genpath(srcMainPath) inteiro: ele coloca na path o
+            % TestEopSystemView.m (fonte editavel) e o TestEopSystemView.mlapp
+            % da pasta view/TestEopSystem, que tem o MESMO nome de classe.
+            % Essa colisao faz o MATLAB resolver a classe errada e perder
+            % metodos como onMaeTick durante a execucao.
+            addpath(fullfile(projectPath, 'src', 'scripts', 'alarm-care-pro'));
+            addpath(genpath(fullfile(srcMainPath, 'model')));
+            addpath(genpath(fullfile(srcMainPath, 'controller')));
+            
+            % creating controller obj (MDO unico TX=RX, modo MAE continuo)
+            app.testEopSystemController = TestEopSystemController(app, true);
+            
+            % changin plot title color to white
+            title(app.UIAxesEyeDiagram, "Eye Diagram", "Color", [0.9 0.9 0.9]);
+            title(app.UIAxesProb, 'OOK Level probability', "Color", [0.9 0.9 0.9]);
+            xlabel(app.UIAxesQFactor, 'Time (s)', 'Color', [0.9 0.9 0.9]);
+            ylabel(app.UIAxesQFactor, 'Q Factor', 'Color', [0.9 0.9 0.9]);
+
+            set(app.UIAxesProb, 'YAxisLocation', 'right');
+            
+            % setting view inputs
+            app.setViewInputs(app.testEopSystemController.getOokParameters())
+
+            demoMode = strcmp(app.SimulationSwitch.Value, 'On');
+            app.startMae(demoMode, true);
+        end
+
+        % Button pushed function: StartButton
+        function StartButtonPushed(app, event)
+            if app.maeRunning
+                % Stop: para o timer e encerra TCP/FIFO. O MDO continua
+                % conectado (o controller e o dono da sessao VISA).
+                app.stopMaeTimer();
+                try
+                    real_time_mae_vlc('stop');
+                catch
+                end
+                app.maeHandles = [];
+                app.setInfoMassage('MAE continuo parado.');
+                return;
+            end
+            app.clearMessage();
+            demoMode = strcmp(app.SimulationSwitch.Value, 'On');
+            app.startMae(demoMode, true);
+        end
+
+        % Value changed function: SimulationSwitch
+        function SimulationSwitchValueChanged(app, event)
+            % Durante o startup o controller ainda pode nao existir (a
+            % atribuicao so termina quando o construtor retorna).
+            if isempty(app.testEopSystemController) || ~isvalid(app.testEopSystemController)
+                return;
+            end
+            value = app.SimulationSwitch.Value;
+            % connectToMdo() forca o switch para On quando o MDO falha.
+            % Esse set dispara este callback de novo; como o controller ja
+            % esta em simulacao, nao ha modo para trocar (evita reentrancia
+            % e recriacao desnecessaria dos servicos).
+            if strcmp(value, 'Off') && app.testEopSystemController.isMdo()
+                return;
+            end
+            if strcmp(value, 'On') && ~app.testEopSystemController.isMdo()
+                return;
+            end
+            wasRunning = app.maeRunning;
+            app.stopMaeTimer();
+            try
+                real_time_mae_vlc('stop');
+            catch
+            end
+            if strcmp(value, 'Off')
+                app.testEopSystemController.switchToMdo();
+            else
+                app.testEopSystemController.switchToSimulation();
+            end
+            demoMode = strcmp(app.SimulationSwitch.Value, 'On');
+            app.startMae(demoMode, wasRunning);
+        end
+
+        % Button pushed function: SaveButton
+        function SaveButtonPushed(app, event)
+            if(~isempty(app.lastResponses))
+                path = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
+                folderName = datestr(datetime('now'), 'yyyy_mm_dd_HH_MM_SS');
+                dataFolderPath = fullfile(path, "data/"+folderName);
+                if ~isfolder(dataFolderPath)
+                    mkdir(dataFolderPath);
+                end
+                responses = app.lastResponses;
+                save(dataFolderPath, 'responses');
+                app.setInfoMassage("The data was saved at " + dataFolderPath)
+            else
+                app.setErrorMassage("Run a transmission first")
+            end
+        end
+
+        % Close request function: UIFigure
+        function UIFigureCloseRequest(app, event)
+            app.stopMaeTimer();
+            try
+                real_time_mae_vlc('stop');
+            catch
+            end
+            try
+                app.testEopSystemController.disconnectAnalizer()
+            catch
+            end
+            delete(app)
+            
+        end
+
+        % Value changed function: NIterationEditField
+        function NIterationEditFieldValueChanged(app, event)
+            value = app.NIterationEditField.Value;
+            
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.AutoResizeChildren = 'off';
+            app.UIFigure.Color = [0.0902 0.0902 0.0902];
+            app.UIFigure.Position = [100 100 1080 720];
+            app.UIFigure.Name = 'MATLAB App';
+            app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
+
+            % Create UIAxesProb
+            app.UIAxesProb = uiaxes(app.UIFigure);
+            xlabel(app.UIAxesProb, 'Prob. Density')
+            ylabel(app.UIAxesProb, 'Amplitude')
+            zlabel(app.UIAxesProb, 'Z')
+            app.UIAxesProb.XColor = [0.902 0.902 0.902];
+            app.UIAxesProb.YColor = [0.902 0.902 0.902];
+            app.UIAxesProb.ZColor = [0.902 0.902 0.902];
+            app.UIAxesProb.Color = [0.1216 0.1216 0.1216];
+            app.UIAxesProb.XGrid = 'on';
+            app.UIAxesProb.YGrid = 'on';
+            app.UIAxesProb.GridColor = [0.15 0.15 0.15];
+            app.UIAxesProb.MinorGridColor = [0.502 0.502 0.502];
+            app.UIAxesProb.Position = [616 69 431 303];
+
+            % Create UIAxesEyeDiagram
+            app.UIAxesEyeDiagram = uiaxes(app.UIFigure);
+            xlabel(app.UIAxesEyeDiagram, 'Time')
+            ylabel(app.UIAxesEyeDiagram, 'Amplitude')
+            zlabel(app.UIAxesEyeDiagram, 'Z')
+            app.UIAxesEyeDiagram.XColor = [0.902 0.902 0.902];
+            app.UIAxesEyeDiagram.YColor = [0.902 0.902 0.902];
+            app.UIAxesEyeDiagram.ZColor = [0.902 0.902 0.902];
+            app.UIAxesEyeDiagram.Color = [0.1216 0.1216 0.1216];
+            app.UIAxesEyeDiagram.XGrid = 'on';
+            app.UIAxesEyeDiagram.YGrid = 'on';
+            app.UIAxesEyeDiagram.GridColor = [0.15 0.15 0.15];
+            app.UIAxesEyeDiagram.MinorGridColor = [0.502 0.502 0.502];
+            app.UIAxesEyeDiagram.Position = [19 69 528 303];
+
+            % Create UIAxesSignal
+            app.UIAxesSignal = uiaxes(app.UIFigure);
+            xlabel(app.UIAxesSignal, 'Time')
+            ylabel(app.UIAxesSignal, 'Amplitude')
+            zlabel(app.UIAxesSignal, 'Z')
+            app.UIAxesSignal.XColor = [0.902 0.902 0.902];
+            app.UIAxesSignal.YColor = [0.902 0.902 0.902];
+            app.UIAxesSignal.ZColor = [0.902 0.902 0.902];
+            app.UIAxesSignal.Color = [0.1216 0.1216 0.1216];
+            app.UIAxesSignal.XGrid = 'on';
+            app.UIAxesSignal.YGrid = 'on';
+            app.UIAxesSignal.GridColor = [0.15 0.15 0.15];
+            app.UIAxesSignal.MinorGridColor = [0.502 0.502 0.502];
+            app.UIAxesSignal.Position = [19 394 320 303];
+
+            % Create UIAxesQFactor
+            app.UIAxesQFactor = uiaxes(app.UIFigure);
+            xlabel(app.UIAxesQFactor, 'Time (s)')
+            ylabel(app.UIAxesQFactor, 'Q Factor')
+            zlabel(app.UIAxesQFactor, 'Z')
+            app.UIAxesQFactor.XColor = [0.902 0.902 0.902];
+            app.UIAxesQFactor.YColor = [0.902 0.902 0.902];
+            app.UIAxesQFactor.ZColor = [0.902 0.902 0.902];
+            app.UIAxesQFactor.Color = [0.1216 0.1216 0.1216];
+            app.UIAxesQFactor.XGrid = 'on';
+            app.UIAxesQFactor.YGrid = 'on';
+            app.UIAxesQFactor.GridColor = [0.15 0.15 0.15];
+            app.UIAxesQFactor.MinorGridColor = [0.502 0.502 0.502];
+            app.UIAxesQFactor.Position = [356 389 320 303];
+
+            % Create StartButton
+            app.StartButton = uibutton(app.UIFigure, 'push');
+            app.StartButton.ButtonPushedFcn = createCallbackFcn(app, @StartButtonPushed, true);
+            app.StartButton.Position = [945 567 100 22];
+            app.StartButton.Text = 'Start';
+
+            % Create kbpsLabel
+            app.kbpsLabel = uilabel(app.UIFigure);
+            app.kbpsLabel.FontColor = [1 1 1];
+            app.kbpsLabel.Position = [893 513 31 22];
+            app.kbpsLabel.Text = 'kbps';
+
+            % Create BandwidthEditFieldLabel
+            app.BandwidthEditFieldLabel = uilabel(app.UIFigure);
+            app.BandwidthEditFieldLabel.HorizontalAlignment = 'right';
+            app.BandwidthEditFieldLabel.FontColor = [1 1 1];
+            app.BandwidthEditFieldLabel.Position = [706 470 62 22];
+            app.BandwidthEditFieldLabel.Text = 'Bandwidth';
+
+            % Create BandwidthEditField
+            app.BandwidthEditField = uieditfield(app.UIFigure, 'text');
+            app.BandwidthEditField.Editable = 'off';
+            app.BandwidthEditField.HorizontalAlignment = 'right';
+            app.BandwidthEditField.FontColor = [0.149 0.149 0.149];
+            app.BandwidthEditField.Tooltip = {'Bw = Rb'};
+            app.BandwidthEditField.Position = [783 470 100 22];
+
+            % Create kHzLabel
+            app.kHzLabel = uilabel(app.UIFigure);
+            app.kHzLabel.FontColor = [1 1 1];
+            app.kHzLabel.Tooltip = {''};
+            app.kHzLabel.Position = [893 470 26 22];
+            app.kHzLabel.Text = 'kHz';
+
+            % Create BitsperIterationEditFieldLabel
+            app.BitsperIterationEditFieldLabel = uilabel(app.UIFigure);
+            app.BitsperIterationEditFieldLabel.HorizontalAlignment = 'right';
+            app.BitsperIterationEditFieldLabel.FontColor = [1 1 1];
+            app.BitsperIterationEditFieldLabel.Position = [675 394 93 22];
+            app.BitsperIterationEditFieldLabel.Text = 'Bits per Iteration';
+
+            % Create BitsperIterationEditField
+            app.BitsperIterationEditField = uieditfield(app.UIFigure, 'text');
+            app.BitsperIterationEditField.Editable = 'off';
+            app.BitsperIterationEditField.HorizontalAlignment = 'right';
+            app.BitsperIterationEditField.FontColor = [0.149 0.149 0.149];
+            app.BitsperIterationEditField.Tooltip = {'Tamanho do payload varia com o frame clínico'};
+            app.BitsperIterationEditField.Position = [783 394 100 22];
+            app.BitsperIterationEditField.Value = 'variável (frame clínico)';
+
+            % Create NIterationEditFieldLabel
+            app.NIterationEditFieldLabel = uilabel(app.UIFigure);
+            app.NIterationEditFieldLabel.HorizontalAlignment = 'right';
+            app.NIterationEditFieldLabel.FontColor = [1 1 1];
+            app.NIterationEditFieldLabel.Position = [704 660 64 22];
+            app.NIterationEditFieldLabel.Text = 'N. Iteration';
+
+            % Create NIterationEditField
+            app.NIterationEditField = uieditfield(app.UIFigure, 'numeric');
+            app.NIterationEditField.ValueChangedFcn = createCallbackFcn(app, @NIterationEditFieldValueChanged, true);
+            app.NIterationEditField.Editable = 'off';
+            app.NIterationEditField.Tooltip = {'Ignorado no modo MAE continuo: a execucao segue ate o Stop'};
+            app.NIterationEditField.Position = [783 660 100 22];
+            app.NIterationEditField.Value = 50;
+
+            % Create BitRateEditFieldLabel
+            app.BitRateEditFieldLabel = uilabel(app.UIFigure);
+            app.BitRateEditFieldLabel.HorizontalAlignment = 'right';
+            app.BitRateEditFieldLabel.FontColor = [1 1 1];
+            app.BitRateEditFieldLabel.Position = [720 513 48 22];
+            app.BitRateEditFieldLabel.Text = 'Bit Rate';
+
+            % Create BitRateEditField
+            app.BitRateEditField = uieditfield(app.UIFigure, 'text');
+            app.BitRateEditField.Editable = 'off';
+            app.BitRateEditField.HorizontalAlignment = 'right';
+            app.BitRateEditField.Position = [783 513 100 22];
+
+            % Create SampleRateEditFieldLabel
+            app.SampleRateEditFieldLabel = uilabel(app.UIFigure);
+            app.SampleRateEditFieldLabel.HorizontalAlignment = 'right';
+            app.SampleRateEditFieldLabel.FontColor = [1 1 1];
+            app.SampleRateEditFieldLabel.Position = [693 430 75 22];
+            app.SampleRateEditFieldLabel.Text = 'Sample Rate';
+
+            % Create SampleRateEditField
+            app.SampleRateEditField = uieditfield(app.UIFigure, 'text');
+            app.SampleRateEditField.Editable = 'off';
+            app.SampleRateEditField.HorizontalAlignment = 'right';
+            app.SampleRateEditField.Position = [783 430 100 22];
+
+            % Create kSpsLabel
+            app.kSpsLabel = uilabel(app.UIFigure);
+            app.kSpsLabel.FontColor = [1 1 1];
+            app.kSpsLabel.Position = [893 432 32 22];
+            app.kSpsLabel.Text = 'kSps';
+
+            % Create SimulationSwitchLabel
+            app.SimulationSwitchLabel = uilabel(app.UIFigure);
+            app.SimulationSwitchLabel.HorizontalAlignment = 'center';
+            app.SimulationSwitchLabel.FontColor = [1 1 1];
+            app.SimulationSwitchLabel.Position = [966 619 62 22];
+            app.SimulationSwitchLabel.Text = 'Simulation';
+
+            % Create SimulationSwitch
+            app.SimulationSwitch = uiswitch(app.UIFigure, 'slider');
+            app.SimulationSwitch.ValueChangedFcn = createCallbackFcn(app, @SimulationSwitchValueChanged, true);
+            app.SimulationSwitch.FontColor = [1 1 1];
+            app.SimulationSwitch.Position = [972 648 45 20];
+
+            % Create Mdo3012LampLabel
+            app.Mdo3012LampLabel = uilabel(app.UIFigure);
+            app.Mdo3012LampLabel.HorizontalAlignment = 'right';
+            app.Mdo3012LampLabel.FontColor = [1 1 1];
+            app.Mdo3012LampLabel.Position = [952 686 55 22];
+            app.Mdo3012LampLabel.Text = 'Mdo3012';
+
+            % Create Mdo3012Lamp
+            app.Mdo3012Lamp = uilamp(app.UIFigure);
+            app.Mdo3012Lamp.Position = [1022 686 20 20];
+            app.Mdo3012Lamp.Color = [0.8 0.8 0.8];
+
+            % Create SaveButton
+            app.SaveButton = uibutton(app.UIFigure, 'push');
+            app.SaveButton.ButtonPushedFcn = createCallbackFcn(app, @SaveButtonPushed, true);
+            app.SaveButton.Position = [947 530 100 22];
+            app.SaveButton.Text = 'Save';
+
+            % Create messageLabel
+            app.messageLabel = uilabel(app.UIFigure);
+            app.messageLabel.HorizontalAlignment = 'center';
+            app.messageLabel.FontColor = [0.9412 0.9412 0.9412];
+            app.messageLabel.Position = [131 14 820 22];
+            app.messageLabel.Text = '';
+
+            % Create AFGstartEditFieldLabel
+            app.AFGstartEditFieldLabel = uilabel(app.UIFigure);
+            app.AFGstartEditFieldLabel.HorizontalAlignment = 'right';
+            app.AFGstartEditFieldLabel.FontColor = [1 1 1];
+            app.AFGstartEditFieldLabel.Position = [711 620 57 22];
+            app.AFGstartEditFieldLabel.Text = 'AFG start';
+
+            % Create AFGstartEditField
+            app.AFGstartEditField = uieditfield(app.UIFigure, 'numeric');
+            app.AFGstartEditField.Limits = [0 5];
+            app.AFGstartEditField.Tooltip = {'Amplitude fixa do AFG no modo MAE continuo'};
+            app.AFGstartEditField.Position = [783 620 100 22];
+            app.AFGstartEditField.Value = 0.5;
+
+            % Create AFGstepEditFieldLabel
+            app.AFGstepEditFieldLabel = uilabel(app.UIFigure);
+            app.AFGstepEditFieldLabel.HorizontalAlignment = 'right';
+            app.AFGstepEditFieldLabel.FontColor = [1 1 1];
+            app.AFGstepEditFieldLabel.Position = [712 583 56 22];
+            app.AFGstepEditFieldLabel.Text = 'AFG step';
+
+            % Create AFGstepEditField
+            app.AFGstepEditField = uieditfield(app.UIFigure, 'numeric');
+            app.AFGstepEditField.Limits = [0 5];
+            app.AFGstepEditField.Editable = 'off';
+            app.AFGstepEditField.Tooltip = {'Sem varredura AFG no modo MAE continuo'};
+            app.AFGstepEditField.Position = [783 583 100 22];
+            app.AFGstepEditField.Value = 0.5;
+
+            % Create AFGendEditFieldLabel
+            app.AFGendEditFieldLabel = uilabel(app.UIFigure);
+            app.AFGendEditFieldLabel.HorizontalAlignment = 'right';
+            app.AFGendEditFieldLabel.FontColor = [1 1 1];
+            app.AFGendEditFieldLabel.Position = [714 548 54 22];
+            app.AFGendEditFieldLabel.Text = 'AFG end';
+
+            % Create AFGendEditField
+            app.AFGendEditField = uieditfield(app.UIFigure, 'numeric');
+            app.AFGendEditField.Limits = [0 5];
+            app.AFGendEditField.Editable = 'off';
+            app.AFGendEditField.Tooltip = {'Sem varredura AFG no modo MAE continuo'};
+            app.AFGendEditField.Position = [783 548 100 22];
+            app.AFGendEditField.Value = 3;
+
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = TestEopSystemViewMae
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+
+            % Execute the startup function
+            runStartupFcn(app, @startupFcn)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end

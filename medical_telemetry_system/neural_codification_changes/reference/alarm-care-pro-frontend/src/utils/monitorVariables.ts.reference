@@ -1,0 +1,75 @@
+import type {
+  MonitorUsedVariables,
+  MonitorVariable,
+  UsedVariableType,
+} from '../types/monitor';
+
+export const SYSTOLIC_KEY = 'Systolic Pressure';
+export const DIASTOLIC_KEY = 'Diastolic Pressure';
+
+export const EMPTY_VARIABLE: UsedVariableType = { value: '-?-', unit: '' };
+
+// O monitor sinaliza "sem leitura nova" com -100 / '--' na mensagem seguinte
+// à medição. BP ignora esse sinal; as demais variáveis não.
+// A comparação é feita sobre String(value) porque o sentinela chega como
+// número (-100) ou como string ("-100"), dependendo do equipamento.
+const NO_READING: ReadonlySet<string> = new Set(['-100', '--', '-?-']);
+
+// Variáveis cujo último valor válido persiste até chegar a próxima leitura.
+const STICKY_VARIABLE_NAMES: ReadonlySet<string> = new Set([
+  SYSTOLIC_KEY,
+  DIASTOLIC_KEY,
+]);
+
+function createMonitorVariables(): MonitorUsedVariables {
+  return {
+    'Ecg Heart Rate': { ...EMPTY_VARIABLE },
+    'Puls Oxim Sat O2': { ...EMPTY_VARIABLE },
+    'Puls Oxim Puls Rate': { ...EMPTY_VARIABLE },
+    'Tthor Resp Rate': { ...EMPTY_VARIABLE },
+    Temp: { ...EMPTY_VARIABLE },
+    [SYSTOLIC_KEY]: { ...EMPTY_VARIABLE },
+    [DIASTOLIC_KEY]: { ...EMPTY_VARIABLE },
+  };
+}
+
+// Derivado de createMonitorVariables() para nunca divergir da lista real de
+// chaves — evita que um nome de variável colida com 'state'/'pendingPressure'.
+const MONITOR_VARIABLE_NAMES: ReadonlySet<string> = new Set(
+  Object.keys(createMonitorVariables())
+);
+
+function isStickyVariable(name: string): boolean {
+  return STICKY_VARIABLE_NAMES.has(name);
+}
+
+function isMonitorVariable(name: string): boolean {
+  return MONITOR_VARIABLE_NAMES.has(name);
+}
+
+function hasReading(value: MonitorVariable['value']): boolean {
+  return !NO_READING.has(String(value));
+}
+
+function toUsedVariable(variable: MonitorVariable): UsedVariableType {
+  return { value: variable.value, unit: variable.unit };
+}
+
+// -100 (e '--'/'-?-') é o sentinela do backend para "sem leitura" e é exibido
+// como '-?-' em todas as variáveis. Não se aplica à pressão arterial, que tem
+// regras próprias de par atômico em bloodPressure.ts.
+function toDisplayVariable(
+  value: MonitorVariable['value'],
+  unit: string
+): UsedVariableType {
+  return hasReading(value) ? { value, unit } : { ...EMPTY_VARIABLE };
+}
+
+export {
+  isStickyVariable,
+  isMonitorVariable,
+  hasReading,
+  toUsedVariable,
+  toDisplayVariable,
+  createMonitorVariables,
+};

@@ -1,0 +1,7 @@
+__pycache__/
+.venv/
+data/
+runs/
+models/
+*.local.json
+!reference/source_manifest.json

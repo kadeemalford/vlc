@@ -1,0 +1,58 @@
+import { Server as HttpServer } from 'http';
+import { Server, Socket } from 'socket.io';
+import { bus, EVENTS } from '../infrastructure/EventBus';
+import { sendSilentAlarm } from '../utils/bombAlarmCommand'; 
+import { sendRefreshAlarm } from '../utils/bombAlarmCommand';
+
+export class SocketServer {
+  private io: Server;
+
+  constructor(httpServer: HttpServer) {
+    this.io = new Server(httpServer, {
+      cors: { origin: '*', methods: ['GET', 'POST'] },
+    });
+
+    this.setupBusListeners();
+    this.io.on('connection', (socket) => this.handleConnection(socket));
+  }
+
+  // 1. Ouve o Barramento e manda pro Frontend (Downlink)
+  private setupBusListeners() {
+    bus.on(EVENTS.DEVICE_DATA, ({ source, payload }) => {
+      this.io.emit(source, payload);
+    });
+
+    bus.on(EVENTS.FRONTEND_RECONNECT, () => {
+      this.io.emit('reconnect');
+    });
+  }
+
+  // 2. Ouve o Frontend e manda pro Barramento/TCP (Uplink)
+  private handleConnection(socket: Socket) {
+    console.log('Nova conexão: Frontend');
+
+    // Exemplo genérico ou específico para silenciar bombas
+    // Mapeando seus eventos antigos para a nova estrutura
+    
+    const setupBombCommand = (bombId: string) => {
+      // Silenciar
+      socket.on(`silent_${bombId}`, (serialNumber) => {
+        const command = sendSilentAlarm(serialNumber);
+        bus.emit(EVENTS.COMMAND_SEND, { target: bombId, command });
+      });
+
+      // Refresh
+      socket.on(`refresh_${bombId}`, (serialNumber) => {
+        const command = sendRefreshAlarm(serialNumber);
+        bus.emit(EVENTS.COMMAND_SEND, { target: bombId, command });
+      });
+    };
+
+    setupBombCommand('bomb1');
+    setupBombCommand('bomb2');
+    setupBombCommand('bomb3');
+    
+    // Nota: A lógica de "disconnect_bomb1" para remover listeners
+    // não é mais necessária pois não atrelamos listeners do TCP ao socket do frontend.
+  }
+}
