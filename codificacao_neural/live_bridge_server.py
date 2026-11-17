@@ -12,6 +12,7 @@ import socket
 
 from codec import sha256
 from live_bridge import LiveBridge
+from monitor_signals import SIGNALS
 
 MAX_LINE = 1024 * 1024
 PROTOCOL = 'vlc_neural_ipc_v1'
@@ -31,16 +32,21 @@ class Controller:
     def dispatch(self, request):
         command = request['command']
         if command == 'hello':
-            return dict(protocol=PROTOCOL, model_sha256=self.model_hash, monitor_started=self.started)
+            return dict(protocol=PROTOCOL, model_sha256=self.model_hash, monitor_started=self.started,
+                        supported_signals=list(SIGNALS), packet_metadata=True,
+                        pressure_atomic_pairs=True)
         if command == 'init':
             if self.bridge is not None or request['model_sha256'] != self.model_hash:
                 raise ValueError('Wrong model or already initialized')
             out = Path(request['out_dir']).resolve()
             if not out.is_dir():
                 raise ValueError('MATLAB must create the output directory first')
+            signals = request.get('signals', ['pulse_rate'])
+            if isinstance(signals, str):
+                signals = [signals]  # MATLAB may unwrap singleton cell arrays.
             self.bridge = LiveBridge(self.model_path, self.model_hash,
-                                     out/'events.jsonl', request['max_age_seconds'])
-            return dict(initialized=True)
+                                     out/'events.jsonl', request['max_age_seconds'], signals)
+            return dict(initialized=True, signals=list(self.bridge.signals))
         if command == 'close':
             self.close()
             return dict(closed=True)

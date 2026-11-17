@@ -24,13 +24,27 @@ mantendo a bancada óptica existente. Código novo em `codificacao_neural/`;
 propostas anteriores, equalizadores e capturas ficam preservados. As prioridades
 anteriores neste documento são históricas quando conflitarem com esta atualização.
 
-**Restrição de escopo em 10/11/2026 — vigente:** usar somente o **monitor de
+**Restrição de escopo em 10/11/2026 — histórico inicial:** usar somente o **monitor de
 frequência cardíaca/pulso**, em bancada de pesquisa, sem pacientes. Excluir ventilador,
 bombas, demais variáveis e alarmes da proposta 6; referências a esses equipamentos
 nas propostas antigas descrevem o legado, não requisitos atuais. Sensor de dedo
 pode fornecer **PR (taxa de pulso óptica)**, distinta de **HR (frequência cardíaca
 do ECG)**: identificar o campo realmente recebido e não renomeá-lo. Não usar o
 codec ou esta bancada para diagnóstico ou decisão clínica.
+
+**Ampliação autorizada em 17/11/2026 — vigente:** manter somente o monitor de
+pesquisa e incluir HR/FC do ECG, SpO₂, PR e pressão arterial sistólica/diastólica.
+Não acrescentar ventilador, bombas, alarmes ou demais variáveis. Pressão deve ser
+pareada na origem e publicada conjuntamente após validação dos dois fragmentos;
+não combinar metades de medições distintas. A demonstração PR-only online foi
+confirmada visualmente pelo usuário; novas variáveis permanecem sem validação
+física nesta atualização. Modelo congelado e Manchester preservados.
+
+A pedido do usuário, há modo de AFG contínuo: primeiro upload com saída OFF,
+habilitação uma vez e manutenção ON inclusive em uploads subsequentes até encerrar.
+Não se presume ausência de transientes de atualização da memória arbitrária.
+AFG OFF ao fim/erro fatal, com conferência presencial. Procedimento e limitações
+em `medical_telemetry_system/neural_codification_changes/MONITOR_VARIABLES.md`.
 
 **Objetivo final atualizado em 16/11/2026:** integrar a codificação neural ao
 sistema completo `medical_telemetry_system/`, preservando a entrega da telemetria

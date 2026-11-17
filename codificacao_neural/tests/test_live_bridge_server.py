@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from codec import fit, save_model, sha256
 from live_bridge_server import Controller, handle_connection, PROTOCOL
+from monitor_signals import SIGNALS
 from test_live_bridge import waveform
 from test_monitor_capture import message
 
@@ -56,6 +57,24 @@ class ExternalBridgeTests(unittest.TestCase):
                                           out_dir=str(self.output), max_age_seconds=5))
         self.assertIsNone(self.controller.bridge)
         self.assertFalse((self.output/'events.jsonl').exists())
+
+    def test_multi_signal_ipc_negotiation_and_singleton_matlab_encoding(self):
+        hello = self.controller.dispatch(dict(command='hello'))
+        self.assertEqual(hello['supported_signals'], list(SIGNALS))
+        result = self.controller.dispatch(dict(command='init', model_sha256=self.digest,
+                                              out_dir=str(self.output), max_age_seconds=5,
+                                              signals=list(SIGNALS)))
+        self.assertEqual(result['signals'], list(SIGNALS))
+        self.assertIsNone(self.controller.bridge.server)
+        with tempfile.TemporaryDirectory() as other:
+            controller = Controller(self.model, self.digest)
+            try:
+                result = controller.dispatch(dict(command='init', model_sha256=self.digest,
+                                                   out_dir=other, max_age_seconds=5,
+                                                   signals='pulse_rate'))
+                self.assertEqual(result['signals'], ['pulse_rate'])
+            finally:
+                controller.close()
 
     def test_dispatch_rx_roundtrip_with_synthetic_phy_no_network(self):
         self.init()

@@ -16,11 +16,28 @@ classdef NeuralBridgeClient < handle
             assert(strcmp(hello.protocol, 'vlc_neural_ipc_v1'), 'Wrong IPC protocol');
         end
 
-        function initialize(obj, modelHash, outDir, maxAge)
+        function initialize(obj, modelHash, outDir, maxAge, signals)
+            if nargin < 5, signals = {'pulse_rate'}; end
             hello = obj.call(struct('command', 'hello'));
             assert(strcmp(hello.model_sha256, modelHash), 'Frozen model mismatch');
-            obj.call(struct('command', 'init', 'model_sha256', modelHash, ...
-                'out_dir', outDir, 'max_age_seconds', maxAge));
+            assert(isfield(hello, 'supported_signals'), 'Update the Python IPC server first');
+            assert(isfield(hello, 'packet_metadata') && hello.packet_metadata, ...
+                'Update Python bridge files: fragment metadata is required');
+            assert(all(ismember(string(signals), string(hello.supported_signals))), ...
+                'Python server does not support selected signals');
+            if any(ismember(string(signals), ["systolic_pressure", "diastolic_pressure"]))
+                assert(isfield(hello, 'pressure_atomic_pairs') && hello.pressure_atomic_pairs, ...
+                    'Python server must support atomic pressure pairs');
+            end
+            request = struct('command', 'init', 'model_sha256', modelHash, ...
+                'out_dir', outDir, 'max_age_seconds', maxAge);
+            request.signals = signals;
+            initialized = obj.call(request);
+            assert(isfield(initialized, 'signals'), 'Python bridge omitted selected signals');
+            actual = string(initialized.signals);
+            expected = string(signals);
+            assert(isequal(sort(actual(:)), sort(expected(:))), ...
+                'Python bridge initialized with unexpected signals');
         end
 
         function value = info(obj)

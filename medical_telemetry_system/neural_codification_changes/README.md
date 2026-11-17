@@ -1,5 +1,11 @@
 # Preparação da integração neural — NÃO aplicada
 
+**Estado vigente em 17/11:** demonstração PR-only online confirmada no painel pelo
+usuário. Extensão implementada para HR/FC, SpO₂, PR e pressão SYS/DIA, com AFG
+contínuo opcional/padrão do novo runner; testes físicos das extensões pendentes.
+Ver [MONITOR_VARIABLES.md](MONITOR_VARIABLES.md). A revisão abaixo descreve a base
+de snapshots preservada; nenhum fonte original do legado foi substituído.
+
 **16/11/2026.** Esta pasta prepara a inclusão do codec em
 `../vlc-system-matlab/`, parte do sistema completo com backend, frontend e API.
 Os fontes ativos **não foram alterados**. Não execute o legado ou acrescente

@@ -2,6 +2,34 @@
 
 ## Retomada — 17/11/2026
 
+### Estado mais recente
+
+- Após corrigir ausência de PR, usuário reportou 58 mensagens, 29 PRs aceitas,
+  29 sem PR ignoradas, 29 tentativas/codec_ok/escritas gateway. Na tentativa 29,
+  zero erros/392 bits, source_exact_match=1, idade 0,3647 s.
+- Em nova rodada visual, usuário confirmou painel seguindo PR do aparelho,
+  inatividade após parada e AFG OFF: demonstração online fim a fim PR-only
+  relatada, artefatos ainda não auditados localmente.
+- Usuário ampliou escopo para HR/FC do ECG, SpO₂ e PR, acrescentando pressão
+  arterial. Implementados `monitor_signals.py`, fila round-robin/idade/validade
+  por sinal e pareamento SYS/DIA: mesmo envelope e OBX-14 compatível, dois pacotes
+  NC1 de 392 bits, publicação conjunta só após ambas as RXs válidas.
+- Nenhum novo modelo: mesmo checkpoint e PHY. Parser antigo `parse_rates`/CLI
+  HR/PR mantidos como wrapper compatível. Backend/frontend/API não alterados.
+- A pedido do usuário, `run_neural_monitor` agora tem AFG contínuo como padrão:
+  primeiro upload OFF, ON uma vez, uploads seguintes ON, desligamento ao terminar
+  ou em erro fatal. `opts.afgMode='per_capture'` preserva o modo anterior.
+  Novo `NeuralAfgController.m`, quatro testes MATLAB sem instrumentos escritos.
+- 58 testes Python aprovados. Testes MATLAB novos não executados aqui; validação
+  física multivariável/pressão/AFG contínuo pendente. Procedimento e arquivos para
+  transferir em `neural_codification_changes/MONITOR_VARIABLES.md`.
+- Próximo passo vigente: transferir fontes/testes novos, executar testes Python
+  e MATLAB sem instrumentos, só depois nova sessão de ponte/token/saída e ensaio.
+  Pressão no frontend é sticky (último par, não leitura continuamente atualizada);
+  timestamps globais do monitor não indicam idade individual da pressão.
+
+### Diagnóstico inicial desta retomada
+
 - Usuário restaurou dados de `bench_20261116_152201.mat`, abriu VISA nova e
   reconferiu setup; horizontal/CH1/banda/amplitude tinham mudado. Ajustes aplicados
   com AFG OFF e preâmbulo atualizado após trigger forçado: 10 MS/s/10k conferidos.

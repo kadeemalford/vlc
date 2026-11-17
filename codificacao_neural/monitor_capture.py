@@ -6,12 +6,13 @@ The explicit --listen option opens a server; importing this module does not.
 import argparse
 from collections import Counter
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 from pathlib import Path
 import socket
 import time
+
+from monitor_signals import parse_observations
 
 RATES = {
     'heart_rate': ('147842', 'MDC_ECG_HEART_RATE', '1.7.4.147842', 'HR'),
@@ -49,52 +50,10 @@ class MllpFramer:
 
 
 def parse_rates(message):
-    """Select exact OBX identifiers; never return PID/MSH contents or invalid raw values."""
-    lines = message.replace(b'\r\n', b'\r').replace(b'\n', b'\r').split(b'\r')
-    header = lines[0].split(b'|')
-    if len(header) < 2 or header[0] != b'MSH' or header[1] != b'^~\\&':
-        raise ValueError('Unsupported HL7 header/separators')
-    records = []
-    for line in lines:
-        fields = line.split(b'|')
-        if len(fields) < 4 or fields[0] != b'OBX':
-            continue
-        identifier = fields[3].split(b'^')
-        for signal, (code, name, sub_id, abbreviation) in RATES.items():
-            if len(identifier) < 2 or identifier[:2] != [code.encode(), name.encode()]:
-                continue
-            record = dict(signal=signal, abbreviation=abbreviation, value_bpm=None,
-                          eligible=False, reason='missing_fields')
-            records.append(record)
-            if len(fields) <= 11:
-                continue
-            if fields[2] != b'NM' or fields[4] != sub_id.encode():
-                record['reason'] = 'unexpected_type_or_sub_id'
-                continue
-            units = fields[6].split(b'^')
-            if len(units) < 2 or units[1] != b'MDC_DIM_BEAT_PER_MIN':
-                record['reason'] = 'unexpected_units'
-                continue
-            if fields[11] not in (b'F', b'C'):
-                record['reason'] = 'observation_not_final_or_corrected'
-                continue
-            try:
-                value = Decimal(fields[5].decode('ascii'))
-            except (UnicodeDecodeError, InvalidOperation):
-                record['reason'] = 'non_numeric'
-                continue
-            if not value.is_finite() or value < 1 or value > 9999:
-                record['reason'] = 'outside_representation_range_or_missing'
-                continue
-            if value != value.to_integral_value():
-                record['reason'] = 'non_integer_no_silent_rounding'
-                continue
-            record.update(value_bpm=int(value), eligible=True, reason='numeric_observation')
-    counts = Counter(r['signal'] for r in records)
-    for record in records:
-        if counts[record['signal']] > 1:
-            record.update(eligible=False, reason='ambiguous_duplicate_signal')
-    return records
+    """Backward-compatible rate-only collector; SpO2 is opt-in through the live bridge."""
+    records = parse_observations(message, tuple(RATES))
+    return [dict(signal=r['signal'], abbreviation=r['abbreviation'], value_bpm=r['value'],
+                 eligible=r['eligible'], reason=r['reason']) for r in records]
 
 
 def compact_frame(record):

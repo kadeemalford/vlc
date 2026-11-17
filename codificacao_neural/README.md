@@ -5,10 +5,12 @@ transportar a representação de mensagens compactas dos aparelhos no setup VLC
 existente. Não exige compressão, alta taxa, vantagem sobre clássicos ou estudo
 de interceptadores na primeira etapa.
 
-**Escopo vigente desde 10/11/2026:** somente taxa cardíaca/pulso do monitor em
-bancada de pesquisa. Ventilador, bombas, alarmes e demais variáveis não integram
-a proposta ativa. No sensor de dedo, confirmar **PR**, sem confundi-la com **HR
-do ECG**. Ver [MONITOR.md](MONITOR.md) para a captura TCP isolada.
+**Escopo ampliado em 17/11/2026:** somente monitor em pesquisa, com HR/FC do ECG,
+SpO₂, PR e pressão sistólica/diastólica pareadas. Ventilador, bombas, alarmes e
+demais variáveis continuam excluídos. No sensor de dedo, confirmar **PR**, sem
+confundi-la com **HR do ECG**. Ver [MONITOR.md](MONITOR.md) para a captura TCP
+isolada HR/PR e [extensão online](../medical_telemetry_system/neural_codification_changes/MONITOR_VARIABLES.md)
+para seleção multivariável e modo AFG contínuo.
 
 **Objetivo final em 16/11/2026:** integrar o codec ao sistema completo MATLAB →
 gateway/backend → painel em `medical_telemetry_system/`, depois de ampliar a validação

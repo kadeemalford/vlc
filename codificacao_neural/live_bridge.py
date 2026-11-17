@@ -15,7 +15,9 @@ import time
 import numpy as np
 
 from codec import decode, encode, load_model, sha256
-from monitor_capture import MllpFramer, compact_frame, parse_rates
+from monitor_capture import MllpFramer
+from monitor_signals import (PRESSURE_SIGNALS, SIGNALS, compact_observation,
+                             parse_compact, parse_observations)
 from packets import pack_packet, unpack_packet, verify_source
 
 
@@ -24,7 +26,17 @@ class ObservationExpired(TimeoutError):
 
 
 class LiveBridge:
-    def __init__(self, model_path, expected_hash, audit_path, max_age=2.0):
+    def __init__(self, model_path, expected_hash, audit_path, max_age=2.0, signals=('pulse_rate',)):
+        if (not isinstance(signals, (list, tuple)) or not signals or
+                len(set(signals)) != len(signals) or any(s not in SIGNALS for s in signals)):
+            raise ValueError('Select distinct supported monitor signals')
+        self.signals = tuple(signals)
+        if any(s in self.signals for s in PRESSURE_SIGNALS) and not all(
+                s in self.signals for s in PRESSURE_SIGNALS):
+            raise ValueError('Select systolic and diastolic pressure together')
+        self.units = tuple(s for s in self.signals if s not in PRESSURE_SIGNALS)
+        if all(s in self.signals for s in PRESSURE_SIGNALS):
+            self.units += ('blood_pressure',)
         if not re.fullmatch(r'[0-9a-f]{64}', expected_hash):
             raise ValueError('Explicit frozen model SHA-256 required')
         if sha256(model_path) != expected_hash:
@@ -43,18 +55,27 @@ class LiveBridge:
         self.worker = None
         self.server = None
         self.gateway = None
-        self.latest = None
+        self.latest = {}
+        self.next_signal_index = 0
         self.pending = None
+        self.active = None
         self.counter = 0
-        self.invalid_version = 0
-        self.last_invalid_reason = None
+        self.invalid_version = dict.fromkeys(self.signals, 0)
+        self.last_invalid_reason = dict.fromkeys(self.signals)
+        self.delivered = {}
         self.counts = Counter()
+        self.signal_counts = {signal: Counter() for signal in self.signals}
         self._log('created', model_sha256=expected_hash, max_age_seconds=max_age,
-                  sync_mode='assisted_full_tx', signal='pulse_rate',
+                  sync_mode='assisted_full_tx', signals=self.signals,
                   raw_hl7_saved=False, application_bytes_to_monitor=0,
                   code_sha256={name: sha256(Path(__file__).parent/name) for name in
                                ('live_bridge.py', 'live_bridge_server.py', 'codec.py',
-                                'packets.py', 'monitor_capture.py')})
+                                'packets.py', 'monitor_capture.py', 'monitor_signals.py')})
+
+    def _count(self, name, signal=None):
+        self.counts[name] += 1
+        if signal is not None:
+            self.signal_counts[signal][name] += 1
 
     def _log(self, event, **fields):
         self.audit.write(json.dumps(dict(event=event, unix_time=time.time(), **fields),
@@ -122,31 +143,83 @@ class LiveBridge:
         with self.lock:
             self.counts['messages'] += 1
             try:
-                records = [r for r in parse_rates(message) if r['signal'] == 'pulse_rate']
+                records = parse_observations(message, self.signals)
             except ValueError:
                 self.counts['malformed_messages'] += 1
                 return
             if not records:
-                # An HL7 message about another signal is not a missing/invalid PR
-                # observation. It must neither cancel PR nor refresh its age.
-                self.counts['messages_without_pr'] += 1
-                return
-            if len(records) != 1 or not records[0]['eligible']:
-                self.counts['source_rejected'] += 1
-                reason = (records[0]['reason'] if len(records) == 1
-                          else 'ambiguous_duplicate_signal')
-                self.counts['pr_rejected_' + reason] += 1
-                self.last_invalid_reason = reason
-                self.invalid_version += 1
-                # Do not deliver a queued value after the selected signal becomes invalid.
-                if self.latest is not None:
-                    self.counts['queue_dropped'] += 1
-                self.latest = None
-                return
-            if self.latest is not None:
-                self.counts['queue_dropped'] += 1
-            self.latest = (compact_frame(records[0]), received)
-            self.counts['source_accepted'] += 1
+                self.counts['messages_without_selected_signals'] += 1
+            for signal in self.signals:
+                rows = [r for r in records if r['signal'] == signal]
+                if not rows:
+                    self.signal_counts[signal]['absent_messages'] += 1
+                    if signal == 'pulse_rate':
+                        self.counts['messages_without_pr'] += 1
+                    continue  # Absence is not invalidity and never refreshes age.
+                if signal in PRESSURE_SIGNALS:
+                    continue  # Process a complete SYS/DIA pair below, never half a cycle.
+                if len(rows) != 1 or not rows[0]['eligible']:
+                    self._count('source_rejected', signal)
+                    reason = rows[0]['reason'] if len(rows) == 1 else 'ambiguous_duplicate_signal'
+                    self.counts[SIGNALS[signal]['abbreviation'].lower() + '_rejected_' + reason] += 1
+                    self.signal_counts[signal]['rejected_' + reason] += 1
+                    self.last_invalid_reason[signal] = reason
+                    self.invalid_version[signal] += 1
+                    if signal in self.latest:
+                        self._count('queue_dropped', signal)
+                        del self.latest[signal]
+                    continue
+                if signal in self.latest:
+                    self._count('queue_dropped', signal)
+                self.latest[signal] = ({signal: compact_observation(rows[0])}, received)
+                self._count('source_accepted', signal)
+            if 'blood_pressure' in self.units:
+                self._feed_pressure(records, received)
+
+    def _feed_pressure(self, records, received):
+        rows = {s: [r for r in records if r['signal'] == s] for s in PRESSURE_SIGNALS}
+        if not any(rows.values()):
+            return
+        reason = None
+        if any(len(rows[s]) != 1 for s in PRESSURE_SIGNALS):
+            reason = 'incomplete_or_duplicate_pressure_pair'
+        elif any(not rows[s][0]['eligible'] for s in PRESSURE_SIGNALS):
+            reason = 'invalid_pressure_pair'
+        else:
+            times = [rows[s][0]['sample_time'] for s in PRESSURE_SIGNALS]
+            if times[0] != times[1]:
+                reason = 'inconsistent_pressure_time'
+        if reason is not None:
+            for signal in PRESSURE_SIGNALS:
+                self.invalid_version[signal] += 1
+                self.last_invalid_reason[signal] = reason
+                self._count('source_rejected', signal)
+                self.signal_counts[signal]['rejected_' + reason] += 1
+                self.counts[SIGNALS[signal]['abbreviation'].lower() + '_rejected_' + reason] += 1
+                if len(rows[signal]) == 1 and not rows[signal][0]['eligible']:
+                    self.signal_counts[signal]['rejected_' + rows[signal][0]['reason']] += 1
+            if 'blood_pressure' in self.latest:
+                del self.latest['blood_pressure']
+                for signal in PRESSURE_SIGNALS:
+                    self._count('queue_dropped', signal)
+            return
+        if 'blood_pressure' in self.latest:
+            for signal in PRESSURE_SIGNALS:
+                self._count('queue_dropped', signal)
+        sources = {s: compact_observation(rows[s][0]) for s in PRESSURE_SIGNALS}
+        self.latest['blood_pressure'] = (sources, received)
+        for signal in PRESSURE_SIGNALS:
+            self._count('source_accepted', signal)
+
+    def _active_invalid(self, active):
+        return any(active['versions'][s] != self.invalid_version[s] for s in active['sources'])
+
+    def _drop_active(self, reason):
+        active, self.active = self.active, None
+        for signal in active['sources']:
+            self._count(reason, signal)
+        self._log('logical_aborted', message_id=active['message_id'],
+                  signals=list(active['sources']), reason=reason)
 
     def next_json(self):
         with self.lock:
@@ -154,35 +227,61 @@ class LiveBridge:
                 raise RuntimeError('Listener stopped; restart explicitly')
             if self.pending is not None:
                 raise ValueError('Finish or reject the in-flight attempt first')
-            if self.latest is None:
+            if self.active is not None:
+                if self._active_invalid(self.active):
+                    self._drop_active('invalidated')
+                elif time.monotonic() - self.active['received'] > self.max_age:
+                    self._drop_active('stale_dropped')
+            if self.active is None:
+                # Up to four logical units: HR, SpO2, PR and a SYS/DIA pair.
+                for offset in range(len(self.units)):
+                    index = (self.next_signal_index + offset) % len(self.units)
+                    unit = self.units[index]
+                    if unit not in self.latest:
+                        continue
+                    sources, received = self.latest.pop(unit)
+                    if time.monotonic() - received > self.max_age:
+                        for signal in sources:
+                            self._count('stale_dropped', signal)
+                        continue
+                    self.counter += 1
+                    if self.counter > 0xffffffff:
+                        raise ValueError('Message ID exhausted; start a new session')
+                    self.active = dict(message_id=self.counter, sources=sources, received=received,
+                                       versions={s: self.invalid_version[s] for s in sources},
+                                       index=0, decoded={})
+                    self.next_signal_index = (index + 1) % len(self.units)
+                    self.counts['logical_prepared'] += 1
+                    break
+            if self.active is None:
                 return '{}'
-            source, received = self.latest
-            self.latest = None
-            if time.monotonic() - received > self.max_age:
-                self.counts['stale_dropped'] += 1
-                return '{}'
-            self.counter += 1
-            if self.counter > 0xffffffff:
-                raise ValueError('Message ID exhausted; start a new session')
+            active = self.active
+            index = active['index']
+            total = len(active['sources'])
+            signal, source = list(active['sources'].items())[index]
             packet = pack_packet(encode(self.model, source), source, self.identity,
-                                 self.counter, 0, 1)
+                                 active['message_id'], index, total)
             bits = np.unpackbits(np.frombuffer(packet, dtype=np.uint8))
-            self.pending = dict(message_id=self.counter, received=received,
-                                invalid_version=self.invalid_version,
+            self.pending = dict(message_id=active['message_id'], signal=signal, received=active['received'],
+                                index=index, total=total,
                                 source_sha256=hashlib.sha256(source).hexdigest(),
                                 tx_bits=bits)
-            self.counts['attempted'] += 1
-            self._log('packet_prepared', message_id=self.counter,
+            self._count('attempted', signal)
+            self._log('packet_prepared', message_id=active['message_id'], signal=signal,
+                      fragment_index=index, fragment_total=total,
                       source_sha256=self.pending['source_sha256'], transmitted_bits=len(bits))
-            return json.dumps(dict(message_id=self.counter, tx_bits=bits.tolist()))
+            return json.dumps(dict(message_id=active['message_id'], signal=signal,
+                                   fragment_index=index, fragment_total=total, tx_bits=bits.tolist()))
 
     def reject(self, reason='phy_rejected'):
         with self.lock:
             if self.pending is not None:
-                self.counts['phy_rejected'] += 1
+                self._count('phy_rejected', self.pending['signal'])
                 self._log('phy_rejected', message_id=self.pending['message_id'],
+                          signal=self.pending['signal'],
                           reason='phy_rejected')  # Never persist arbitrary instrument/HL7 text.
                 self.pending = None
+                self.active = None
 
     def receive_json(self, aligned_json):
         """Integrate Manchester RX; TX is used only for post-decode BER evaluation."""
@@ -190,7 +289,11 @@ class LiveBridge:
             if self.pending is None:
                 raise ValueError('No in-flight attempt')
             pending, self.pending = self.pending, None
-            result = dict(message_id=pending['message_id'], codec_ok=False,
+            signal = pending['signal']
+            active = self.active
+            result = dict(message_id=pending['message_id'], signal=signal, codec_ok=False,
+                          fragment_index=pending['index'], fragment_total=pending['total'],
+                          message_complete=False,
                           gateway_write_ok=False, panel_delivery_confirmed=False)
             try:
                 samples = np.asarray(json.loads(aligned_json), dtype=float).reshape(-1)
@@ -200,49 +303,80 @@ class LiveBridge:
                 bits = (frames[:, :5].mean(1) > frames[:, 5:].mean(1)).astype(np.uint8)
                 packet = unpack_packet(np.packbits(bits).tobytes(), self.identity)
                 if (packet['message_id'] != pending['message_id'] or
-                        packet['index'] != 0 or packet['total'] != 1 or packet['source_bytes'] != 10):
+                        packet['index'] != pending['index'] or packet['total'] != pending['total']
+                        or packet['source_bytes'] != 10):
                     raise ValueError('Unexpected logical message')
                 source = decode(self.model, packet['latent'])
                 verify_source(packet, source)
-                if not re.fullmatch(rb'!#MDPR[0-9]{4}', source) or int(source[6:]) == 0:
-                    raise ValueError('Unexpected compact PR frame')
+                value = parse_compact(source, signal)
                 result.update(codec_ok=True, source_sha256=hashlib.sha256(source).hexdigest(),
                               source_exact_match=hashlib.sha256(source).hexdigest() == pending['source_sha256'],
                               bit_errors=int(np.count_nonzero(bits != pending['tx_bits'])),
                               evaluated_bits=len(bits))
-                self.counts['codec_ok'] += 1
+                self._count('codec_ok', signal)
                 age = time.monotonic() - pending['received']
                 result['age_at_gateway_write_seconds'] = age
-                if pending['invalid_version'] != self.invalid_version:
-                    self.counts['invalidated'] += 1
+                if self._active_invalid(active):
+                    self._count('invalidated', signal)
                     result['reason'] = 'source_invalidated_during_phy'
-                    result['source_invalid_reason'] = self.last_invalid_reason
+                    result['source_invalid_reason'] = next(
+                        self.last_invalid_reason[s] for s in active['sources']
+                        if active['versions'][s] != self.invalid_version[s])
                 elif age > self.max_age:
-                    self.counts['stale_dropped'] += 1
+                    self._count('stale_dropped', signal)
                     result['reason'] = 'stale'
                 else:
-                    envelope = dict(source='monitor_message', payload={
-                        'type': 'Monitor Measurements',
-                        'variables': [{'name': 'Puls Oxim Puls Rate',
-                                       'value': str(int(source[6:])), 'unit': '1/min'}],
-                        'alarms': []})
-                    self._send(envelope, pending['received'])
-                    result['gateway_write_ok'] = True
-                    self.counts['gateway_write_ok'] += 1
+                    active['decoded'][signal] = value
+                    active['index'] += 1
+                    if active['index'] < len(active['sources']):
+                        result['reason'] = 'awaiting_pressure_pair'
+                    else:
+                        result['message_complete'] = True
+                        envelope, cleared = self._envelope(active['decoded'])
+                        self._send(envelope, pending['received'])
+                        for delivered_signal in active['sources']:
+                            self.delivered[delivered_signal] = (
+                                pending['received'], active['versions'][delivered_signal])
+                            self.signal_counts[delivered_signal]['gateway_write_ok'] += 1
+                        result['gateway_write_ok'] = True
+                        result['cleared_signals'] = cleared
+                        self._count('gateway_write_ok')
             except ObservationExpired:
-                self.counts['stale_dropped'] += 1
+                self._count('stale_dropped', signal)
                 result['reason'] = 'stale_during_gateway_connection'
             except (ValueError, TypeError, OverflowError):
-                self.counts['codec_rejected'] += 1
+                self._count('codec_rejected', signal)
                 result['reason'] = 'invalid_rx'
             except OSError:
-                self.counts['gateway_failed'] += 1
+                self._count('gateway_failed', signal)
                 result['reason'] = 'gateway_failed_no_retry'
                 if self.gateway is not None:
                     self.gateway.close()
                     self.gateway = None
+            if result.get('reason') != 'awaiting_pressure_pair':
+                self.active = None
             self._log('attempt_finished', **result)
             return json.dumps(result)
+
+    def _envelope(self, observations):
+        variables = [dict(name=SIGNALS[s]['panel_name'], value=str(value), unit=SIGNALS[s]['unit'])
+                     for s, value in observations.items()]
+        cleared = []
+        now = time.monotonic()
+        # Never resend cached numeric readings as fresh RX. Only append legacy
+        # no-reading markers for other selected fields that are unknown/expired.
+        for other in self.signals:
+            if other in observations or other in PRESSURE_SIGNALS:
+                continue
+            delivered = self.delivered.get(other)
+            if (delivered is None or now-delivered[0] > self.max_age or
+                    delivered[1] != self.invalid_version[other]):
+                other_spec = SIGNALS[other]
+                variables.append(dict(name=other_spec['panel_name'], value='-?-',
+                                      unit=other_spec['unit']))
+                cleared.append(other)
+        return dict(source='monitor_message', payload={
+            'type': 'Monitor Measurements', 'variables': variables, 'alarms': []}), cleared
 
     def _send(self, envelope, received):
         if self.gateway is None:
@@ -254,7 +388,7 @@ class LiveBridge:
 
     def stats_json(self):
         with self.lock:
-            return json.dumps(dict(self.counts))
+            return json.dumps(dict(self.counts, signals={s: dict(c) for s, c in self.signal_counts.items()}))
 
     def close(self):
         self.stop_event.set()
@@ -267,5 +401,6 @@ class LiveBridge:
         with self.lock:
             if not self.audit.closed:
                 self._log('closed', counts=dict(self.counts),
-                          unfinished_attempt=self.pending is not None)
+                          signals={s: dict(c) for s, c in self.signal_counts.items()},
+                           unfinished_attempt=self.pending is not None or self.active is not None)
                 self.audit.close()
