@@ -12,7 +12,8 @@ import socket
 
 from codec import sha256
 from live_bridge import LiveBridge
-from monitor_signals import SIGNALS
+from monitor_signals import VITAL_SIGNALS
+from latency import SCHEMA
 
 MAX_LINE = 1024 * 1024
 PROTOCOL = 'vlc_neural_ipc_v1'
@@ -33,8 +34,8 @@ class Controller:
         command = request['command']
         if command == 'hello':
             return dict(protocol=PROTOCOL, model_sha256=self.model_hash, monitor_started=self.started,
-                        supported_signals=list(SIGNALS), packet_metadata=True,
-                        pressure_atomic_pairs=True)
+                        supported_signals=list(VITAL_SIGNALS), packet_metadata=True,
+                        latency_schema=SCHEMA)
         if command == 'init':
             if self.bridge is not None or request['model_sha256'] != self.model_hash:
                 raise ValueError('Wrong model or already initialized')

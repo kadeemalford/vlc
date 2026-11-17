@@ -2,7 +2,7 @@
 
 ## Contextualização e objetivo do repositório
 
-O objetivo principal deste repositório é **selecionar, implementar e avaliar uma aplicação de machine learning (ML) ao sistema de comunicação por luz visível (VLC), produzindo evidências para publicar um artigo científico**. Não basta integrar uma rede neural: o trabalho precisa responder a uma pergunta mensurável, comparar referências fortes e demonstrar uma contribuição atribuível ao aprendizado. Preferem-se intervenções de software que aproveitem a bancada existente, sem alterações expressivas de hardware.
+O objetivo principal deste repositório é **selecionar, implementar e avaliar uma aplicação de machine learning (ML) ao sistema de comunicação por luz visível (VLC), produzindo evidências para publicar um artigo científico**. Na proposta 6 vigente, a contribuição é uma prova de conceito experimental de codificação/reconstrução neural integrada ao sistema, com fidelidade e limitações documentadas, **sem comparação com métodos clássicos**. Exigências de comparação/superioridade nas propostas anteriores são históricas, não requisitos desta etapa. Preferem-se intervenções de software que aproveitem a bancada existente, sem alterações expressivas de hardware.
 
 As propostas abaixo foram revistas considerando os scripts MATLAB, e não apenas seu README. Nenhuma apresenta ganho de ML já comprovado: a escolha deve depender de um piloto que avalie dados, limitações do baseline e viabilidade experimental.
 
@@ -32,13 +32,22 @@ pode fornecer **PR (taxa de pulso óptica)**, distinta de **HR (frequência card
 do ECG)**: identificar o campo realmente recebido e não renomeá-lo. Não usar o
 codec ou esta bancada para diagnóstico ou decisão clínica.
 
-**Ampliação autorizada em 17/11/2026 — vigente:** manter somente o monitor de
+**Ampliação autorizada em 17/11/2026 — histórico intermediário:** manter somente o monitor de
 pesquisa e incluir HR/FC do ECG, SpO₂, PR e pressão arterial sistólica/diastólica.
 Não acrescentar ventilador, bombas, alarmes ou demais variáveis. Pressão deve ser
 pareada na origem e publicada conjuntamente após validação dos dois fragmentos;
 não combinar metades de medições distintas. A demonstração PR-only online foi
 confirmada visualmente pelo usuário; novas variáveis permanecem sem validação
 física nesta atualização. Modelo congelado e Manchester preservados.
+
+**Decisão posterior em 17/11/2026 — vigente:** retirar pressão arterial por ser
+intermitente e manter HR/FC do ECG, SpO₂ e PR. Usuário confirmou os três campos
+seguindo o aparelho no painel, após atravessar a camada neural e o VLC.
+O artigo demonstrará essa capacidade ponta a ponta, **sem comparação clássica**,
+sem exigir compressão, vantagem sobre outro codec ou prova de sigilo.
+Coleta adicional limita-se à auditoria, repetibilidade, fidelidade, perdas e idade
+recepção PC→escrita gateway. Latência real até render exige instrumentação própria.
+Plano em `medical_telemetry_system/neural_codification_changes/ARTICLE_VALIDATION.md`.
 
 A pedido do usuário, há modo de AFG contínuo: primeiro upload com saída OFF,
 habilitação uma vez e manutenção ON inclusive em uploads subsequentes até encerrar.

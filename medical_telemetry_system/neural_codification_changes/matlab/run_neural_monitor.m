@@ -13,13 +13,10 @@ for k = 1:numel(required)
     assert(isfield(opts, required{k}), 'Missing option: %s', required{k});
 end
 if ~isfield(opts, 'signals'), opts.signals = {'pulse_rate'}; end
-allowedSignals = {'heart_rate', 'oxygen_saturation', 'pulse_rate', ...
-    'systolic_pressure', 'diastolic_pressure'};
+allowedSignals = {'heart_rate', 'oxygen_saturation', 'pulse_rate'};
 assert(iscellstr(opts.signals) && ~isempty(opts.signals) && ...
     all(ismember(opts.signals, allowedSignals)) && ...
     numel(unique(opts.signals)) == numel(opts.signals), 'Select distinct supported signals');
-assert(ismember('systolic_pressure', opts.signals) == ...
-    ismember('diastolic_pressure', opts.signals), 'Select both cuff pressure fields together');
 if isequal(opts.signals, {'pulse_rate'})
     assert(any(strcmp(opts.confirmation, {'CONFIRM_RESEARCH_PR_VLC_AND_GATEWAY', ...
         'CONFIRM_RESEARCH_MONITOR_VLC_AND_GATEWAY'})), 'Explicit research authorization required');
@@ -31,6 +28,8 @@ if ~isfield(opts, 'seconds'), opts.seconds = 60; end
 if ~isfield(opts, 'maxAgeSeconds'), opts.maxAgeSeconds = 2; end
 if ~isfield(opts, 'controlPort'), opts.controlPort = 47651; end
 if ~isfield(opts, 'afgMode'), opts.afgMode = 'continuous'; end
+if ~isfield(opts, 'verbose'), opts.verbose = false; end
+validateattributes(opts.verbose, {'logical', 'numeric'}, {'scalar', 'binary'});
 opts.afgMode = validatestring(opts.afgMode, {'continuous', 'per_capture'});
 validateattributes(opts.seconds, {'numeric'}, {'scalar', 'finite', 'positive', '<=', 3600});
 assert(isa(scopeVisa, 'visa') && strcmpi(get(scopeVisa, 'Status'), 'open'), ...
@@ -76,10 +75,23 @@ for name = {'run_neural_monitor', 'NeuralBridgeClient', 'NeuralAfgController', .
     copyfile(source, fullfile(codeDir, [name{1} '.m']));
 end
 
+matlabAudit = fullfile(opts.outDir, 'matlab_events.jsonl');
+assert(~isfile(matlabAudit), 'MATLAB timing audit already exists');
+startupTimer = tic;
 bridge = NeuralBridgeClient(opts.controlPort, opts.controlToken);
+startupTimings.matlab_ipc_connect_seconds = toc(startupTimer);
 bridgeCleanup = onCleanup(@() bridge.close()); %#ok<NASGU>
+startupTimer = tic;
 bridge.initialize(opts.modelSha256, opts.outDir, opts.maxAgeSeconds, opts.signals);
+startupTimings.matlab_initialize_rpc_seconds = toc(startupTimer);
+startupTimer = tic;
 bridge.start(opts.host);
+startupTimings.matlab_start_listener_rpc_seconds = toc(startupTimer);
+sessionRecord = struct('event', 'matlab_session_started', 'timing_schema', 'neural_latency_v1', ...
+    'model_sha256', opts.modelSha256, 'afg_mode', opts.afgMode, 'verbose', logical(opts.verbose), ...
+    'requested_seconds', opts.seconds, 'max_age_seconds', opts.maxAgeSeconds, 'timings', startupTimings);
+sessionRecord.signals = opts.signals;
+appendAudit(matlabAudit, sessionRecord);
 
 analyzer = ExistingVisaMdo3012Analyzer(scopeVisa);
 params = ManchesterOokParameters();
@@ -90,9 +102,15 @@ afgCleanup = onCleanup(@() afg.close()); %#ok<NASGU>
 fprintf('Research monitor live run: %s. No commands/HL7 ACK. Ctrl+C stops; verify AFG OFF.\n', ...
     strjoin(opts.signals, ', '));
 fprintf('AFG mode: %s. Continuous mode uploads subsequent waveforms with output ON.\n', opts.afgMode);
-timer = tic;
-while toc(timer) < opts.seconds
-    request = jsondecode(char(bridge.next_json()));
+runTimer = tic;
+while toc(runTimer) < opts.seconds
+    cycleTimer = tic;
+    pollTimer = tic;
+    requestJson = bridge.next_json();
+    nextRpcSeconds = toc(pollTimer);
+    jsonTimer = tic;
+    request = jsondecode(char(requestJson));
+    requestJsonSeconds = toc(jsonTimer);
     if ~isfield(request, 'tx_bits')
         pause(0.02);
         drawnow;
@@ -105,15 +123,29 @@ while toc(timer) < opts.seconds
     status = 'error'; error_message = ''; stage = 'encode';
     bit_rate = 1e6; sps = 10; tx_sample_rate = 10e6; rx_sample_rate = NaN;
     started_at_utc = char(datetime('now', 'TimeZone', 'UTC'));
+    matlab_timings = struct('matlab_next_rpc_seconds', nextRpcSeconds, ...
+        'matlab_request_json_seconds', requestJsonSeconds, ...
+        'matlab_baseband_seconds', NaN, 'matlab_upload_seconds', NaN, ...
+        'matlab_acquisition_seconds', NaN, 'matlab_sync_seconds', NaN, ...
+        'matlab_rx_json_seconds', NaN, 'matlab_receive_rpc_seconds', NaN, ...
+        'matlab_cycle_seconds', NaN, 'matlab_capture_save_seconds', NaN);
     fatalError = [];
+    timingField = 'matlab_baseband_seconds';
+    stageTimer = tic;
     try
         tx = encoder.generateBaseBandSignal(tx_bits');
         tx_samples = double(tx.getSamples());
         assert(tx.getSampleRate() == 10e6 && numel(tx_bits) == 392, 'Unexpected TX');
+        matlab_timings.(timingField) = toc(stageTimer);
         stage = 'upload';
+        timingField = 'matlab_upload_seconds';
+        stageTimer = tic;
         % First upload is OFF; subsequent uploads remain ON in continuous mode.
         analyzer.writeSamples(tx);
+        matlab_timings.(timingField) = toc(stageTimer);
         stage = 'acquisition';
+        timingField = 'matlab_acquisition_seconds';
+        stageTimer = tic;
         afg.enable();
         pause(0.05);
         rx = analyzer.readSamples(1);
@@ -122,17 +154,30 @@ while toc(timer) < opts.seconds
         rx_sample_rate = rx.getSampleRate();
         assert(rx_sample_rate == tx_sample_rate, 'RX sample rate changed');
         assert(~isempty(rx_raw) && all(isfinite(rx_raw)) && max(abs(rx_raw)) > 0, 'Invalid RX');
+        matlab_timings.(timingField) = toc(stageTimer);
         stage = 'synchronization';
+        timingField = 'matlab_sync_seconds';
+        stageTimer = tic;
         normalized = SignalUtils.normalizeSignal(rx);
         [candidate, sync_info] = synchronize_capture_samples( ...
             tx_samples, normalized.getSamples(), .5);
         assert(sync_info.accepted, 'PHY synchronization rejected');
         rx_aligned = double(candidate);
         assert(numel(rx_aligned) == numel(tx_bits)*sps, 'Invalid aligned length');
+        matlab_timings.(timingField) = toc(stageTimer);
+        stage = 'rx_json';
+        timingField = 'matlab_rx_json_seconds';
+        stageTimer = tic;
+        alignedJson = jsonencode(rx_aligned);
+        matlab_timings.(timingField) = toc(stageTimer);
         stage = 'decode_and_gateway';
-        result = jsondecode(char(bridge.receive_json(jsonencode(rx_aligned))));
+        timingField = 'matlab_receive_rpc_seconds';
+        stageTimer = tic;
+        result = jsondecode(char(bridge.receive_json(alignedJson)));
+        matlab_timings.(timingField) = toc(stageTimer);
         status = 'ok'; % PHY accepted; codec/gateway results remain separate.
     catch ME
+        matlab_timings.(timingField) = toc(stageTimer);
         if strcmp(opts.afgMode, 'per_capture')
             afg.afterAcquire();
         else
@@ -147,6 +192,7 @@ while toc(timer) < opts.seconds
         error_message = [ME.identifier ': ' ME.message];
         warning('VLC:NeuralAttempt', 'Attempt %d failed at %s', request.message_id, stage);
     end
+    matlab_timings.matlab_cycle_seconds = toc(cycleTimer);
     metadata_json = jsonencode(struct('message_id', request.message_id, 'signal', request.signal, ...
         'fragment_index', request.fragment_index, 'fragment_total', request.fragment_total, ...
         'model_sha256', opts.modelSha256, 'sync_mode', 'assisted_full_tx', ...
@@ -154,19 +200,53 @@ while toc(timer) < opts.seconds
     filename = fullfile(opts.outDir, sprintf('message_%010d_p%02d.mat', ...
         request.message_id, request.fragment_index + 1));
     assert(~isfile(filename), 'Capture already exists');
+    saveTimer = tic;
     save(filename, 'tx_bits', 'tx_samples', 'rx_raw', 'rx_aligned', ...
         'rx_sample_rate', 'tx_sample_rate', 'sps', 'bit_rate', 'sync_info', ...
-        'status', 'stage', 'error_message', 'metadata_json', 'started_at_utc', '-v7');
-    disp(result);
+        'status', 'stage', 'error_message', 'metadata_json', 'started_at_utc', 'matlab_timings', '-v7');
+    matlab_timings.matlab_capture_save_seconds = toc(saveTimer);
+    appendAudit(matlabAudit, struct('event', 'matlab_attempt', 'timing_schema', 'neural_latency_v1', ...
+        'message_id', request.message_id, 'fragment_index', request.fragment_index, ...
+        'signal', request.signal, 'status', status, 'stage', stage, 'timings', matlab_timings));
+    if opts.verbose, disp(result); end
+    if isfield(result, 'timings')
+        fprintf('ID=%d %s codec=%d gateway=%d encoder=%s decoder=%s PC->TCP=%s\n', ...
+            request.message_id, request.signal, result.codec_ok, result.gateway_write_ok, ...
+            timingLabel(result.timings, 'encoder_seconds'), ...
+            timingLabel(result.timings, 'decoder_seconds'), ...
+            timingLabel(result.timings, 'pc_to_gateway_write_seconds'));
+    else
+        fprintf('ID=%d %s failed at %s\n', request.message_id, request.signal, stage);
+    end
     if ~isempty(fatalError)
         rethrow(fatalError);
     end
     drawnow;
 end
 afg.close();
+appendAudit(matlabAudit, struct('event', 'matlab_session_finished', ...
+    'timing_schema', 'neural_latency_v1', 'run_seconds', toc(runTimer), ...
+    'afg_off_requested', true));
 disp(char(bridge.stats_json()));
 end
 
 function turnOff(session)
 fprintf(session, 'AFG:OUTPUT:STATE OFF');
+end
+
+function appendAudit(path, record)
+record.unix_time = posixtime(datetime('now', 'TimeZone', 'UTC'));
+fid = fopen(path, 'a');
+assert(fid ~= -1, 'Cannot open MATLAB timing audit');
+cleanup = onCleanup(@() fclose(fid)); %#ok<NASGU>
+fprintf(fid, '%s\n', jsonencode(record));
+end
+
+function label = timingLabel(timings, name)
+value = timings.(name);
+if isnumeric(value) && isscalar(value) && isfinite(value)
+    label = sprintf('%.3f ms', value*1000);
+else
+    label = 'n/a';
+end
 end

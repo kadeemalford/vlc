@@ -1,6 +1,12 @@
 # Preparação da integração neural — NÃO aplicada
 
-**Estado vigente em 17/11:** demonstração PR-only online confirmada no painel pelo
+**Escopo atual:** HR/FC, SpO₂ e PR; pressão retirada do caminho ativo. O artigo
+é uma prova de conceito experimental, sem comparação com métodos clássicos.
+Ver [MONITOR_VARIABLES.md](MONITOR_VARIABLES.md) e
+[ARTICLE_VALIDATION.md](ARTICLE_VALIDATION.md). Código de pressão anterior
+preservado em `archive/pressure_experiment_20261117/`, sem apagar dados.
+
+**Histórico intermediário em 17/11:** demonstração PR-only online confirmada no painel pelo
 usuário. Extensão implementada para HR/FC, SpO₂, PR e pressão SYS/DIA, com AFG
 contínuo opcional/padrão do novo runner; testes físicos das extensões pendentes.
 Ver [MONITOR_VARIABLES.md](MONITOR_VARIABLES.md). A revisão abaixo descreve a base

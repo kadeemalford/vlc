@@ -1,4 +1,4 @@
-"""Exact research monitor fields: ECG HR, SpO2, PR, and cuff pressure SYS/DIA.
+"""Research monitor fields: active ECG HR/SpO2/PR; historical pressure diagnostics.
 
 Numeric eligibility is representation validation, not sensor/clinical validation.
 """

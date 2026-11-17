@@ -1,7 +1,7 @@
 # Integração online PR → VLC → gateway → painel
 
 **Configuração vigente:** ver [MONITOR_VARIABLES.md](MONITOR_VARIABLES.md) para
-HR/FC, SpO₂, PR, pressão arterial pareada e AFG contínuo. PR-only foi confirmado
+HR/FC, SpO₂, PR e AFG contínuo; pressão foi retirada. PR-only foi confirmado
 visualmente pelo usuário em 17/11; extensões ainda pendentes de ensaio físico.
 Este documento preserva o procedimento PR-only inicial. O runner atualizado usa
 AFG contínuo por padrão; para reproduzir exatamente o modo inicial, definir

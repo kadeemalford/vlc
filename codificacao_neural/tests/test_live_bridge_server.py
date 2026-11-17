@@ -10,7 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from codec import fit, save_model, sha256
 from live_bridge_server import Controller, handle_connection, PROTOCOL
-from monitor_signals import SIGNALS
+from monitor_signals import VITAL_SIGNALS
 from test_live_bridge import waveform
 from test_monitor_capture import message
 
@@ -60,11 +60,11 @@ class ExternalBridgeTests(unittest.TestCase):
 
     def test_multi_signal_ipc_negotiation_and_singleton_matlab_encoding(self):
         hello = self.controller.dispatch(dict(command='hello'))
-        self.assertEqual(hello['supported_signals'], list(SIGNALS))
+        self.assertEqual(hello['supported_signals'], list(VITAL_SIGNALS))
         result = self.controller.dispatch(dict(command='init', model_sha256=self.digest,
                                               out_dir=str(self.output), max_age_seconds=5,
-                                              signals=list(SIGNALS)))
-        self.assertEqual(result['signals'], list(SIGNALS))
+                                              signals=list(VITAL_SIGNALS)))
+        self.assertEqual(result['signals'], list(VITAL_SIGNALS))
         self.assertIsNone(self.controller.bridge.server)
         with tempfile.TemporaryDirectory() as other:
             controller = Controller(self.model, self.digest)
@@ -76,11 +76,21 @@ class ExternalBridgeTests(unittest.TestCase):
             finally:
                 controller.close()
 
+    def test_pressure_selection_rejected_by_ipc_before_audit_creation(self):
+        hello = self.controller.dispatch(dict(command='hello'))
+        self.assertNotIn('systolic_pressure', hello['supported_signals'])
+        with self.assertRaises(ValueError):
+            self.controller.dispatch(dict(command='init', model_sha256=self.digest,
+                                          out_dir=str(self.output), max_age_seconds=5,
+                                          signals=['systolic_pressure', 'diastolic_pressure']))
+        self.assertIsNone(self.controller.bridge)
+        self.assertFalse((self.output/'events.jsonl').exists())
+
     def test_dispatch_rx_roundtrip_with_synthetic_phy_no_network(self):
         self.init()
         bridge = self.controller.bridge
         sent = []
-        bridge._send = lambda envelope, received: sent.append(envelope)
+        bridge._send = lambda envelope, received, timings=None: sent.append(envelope)
         with patch.object(bridge, 'start') as start:
             self.controller.dispatch(dict(command='start', host='192.0.2.1'))
             start.assert_called_once_with('192.0.2.1', 2222, '127.0.0.1', 4455)

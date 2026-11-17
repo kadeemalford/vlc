@@ -4,6 +4,23 @@
 
 ### Estado mais recente
 
+- Decisão posterior do usuário: retirar pressão arterial do ensaio, pois a
+  medição é intermitente e o frontend conserva o valor. LiveBridge/IPC/runner
+  agora aceitam apenas HR/FC, SpO₂ e PR; nenhuma captura foi apagada.
+  Código/testes de pressão anteriores em
+  `neural_codification_changes/archive/pressure_experiment_20261117/`.
+  Parser/inspeção de pressão mantidos somente como diagnóstico histórico.
+- Usuário confirmou o objetivo do artigo: prova de conceito de codificação e
+  decodificação neural no VLC, **sem comparação com clássicos**. Não exigir
+  superioridade/compressão/segurança como portões para esse escopo.
+- HR/FC, SpO₂ e PR já foram observadas corretas no painel conforme usuário.
+  Recomendada auditoria dos registros e exemplo de três sessões de cinco minutos
+  para repetibilidade, métricas por sinal e idade PC→gateway, sem novos métodos.
+  Não chamar essa idade de latência aparelho→render. Plano em
+  `neural_codification_changes/ARTICLE_VALIDATION.md`.
+
+### Etapas anteriores (preservadas)
+
 - Primeiro ensaio ampliado: usuário confirmou HR/FC, SpO₂ e PR corretas no painel,
   mas não pressão, apesar de valor visível no aparelho. Resumo SYS:
   absent_messages=178, source_rejected=1,

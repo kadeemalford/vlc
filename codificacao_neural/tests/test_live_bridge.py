@@ -42,7 +42,7 @@ class LiveBridgeTests(unittest.TestCase):
         self.bridge = LiveBridge(self.path, self.digest, Path(self.output.name)/'events.jsonl', 5)
         self.addCleanup(self.bridge.close)
         self.sent = []
-        self.bridge._send = lambda envelope, received: self.sent.append(envelope)
+        self.bridge._send = lambda envelope, received, timings=None: self.sent.append(envelope)
 
     def request(self, value='70'):
         self.bridge.feed_message(message(value=value))
@@ -200,8 +200,8 @@ class LiveBridgeTests(unittest.TestCase):
         received = threading.Event()
         original = self.bridge.feed_message
 
-        def consume(body):
-            original(body)
+        def consume(body, received_at=None):
+            original(body, received_at=received_at)
             received.set()
 
         self.bridge.feed_message = consume

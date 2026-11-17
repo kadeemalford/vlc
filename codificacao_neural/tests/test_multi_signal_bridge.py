@@ -37,7 +37,7 @@ class MultiSignalBridgeTests(unittest.TestCase):
                                  max_age=5, signals=list(VITAL_SIGNALS))
         self.addCleanup(self.bridge.close)
         self.sent = []
-        self.bridge._send = lambda envelope, received: self.sent.append(envelope)
+        self.bridge._send = lambda envelope, received, timings=None: self.sent.append(envelope)
 
     def receive(self, request):
         return json.loads(self.bridge.receive_json(waveform(request['tx_bits'])))
@@ -153,11 +153,19 @@ class MultiSignalBridgeTests(unittest.TestCase):
         self.assertEqual(self.sent, [])
 
     def test_invalid_signal_selections_rejected_without_outputs(self):
-        for signals in ([], ['pulse_rate', 'pulse_rate'], ['temperature'], 'pulse_rate'):
+        for signals in ([], ['pulse_rate', 'pulse_rate'], ['temperature'], 'pulse_rate',
+                        ['systolic_pressure'], ['systolic_pressure', 'diastolic_pressure']):
             with self.assertRaises(ValueError):
                 LiveBridge(self.model_path, self.digest, Path(self.output.name)/'invalid.jsonl',
                            signals=signals)
         self.assertFalse((Path(self.output.name)/'invalid.jsonl').exists())
+
+    def test_pressure_fields_are_ignored_by_active_three_signal_pipeline(self):
+        self.bridge.feed_message(combined(signal_message('systolic_pressure', '120'),
+                                          signal_message('diastolic_pressure', '80')))
+        self.assertEqual(self.bridge.next_json(), '{}')
+        self.assertEqual(self.bridge.counts['source_accepted'], 0)
+        self.assertEqual(self.sent, [])
 
 
 if __name__ == '__main__':
