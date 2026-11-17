@@ -47,6 +47,7 @@ class LiveBridge:
         self.pending = None
         self.counter = 0
         self.invalid_version = 0
+        self.last_invalid_reason = None
         self.counts = Counter()
         self._log('created', model_sha256=expected_hash, max_age_seconds=max_age,
                   sync_mode='assisted_full_tx', signal='pulse_rate',
@@ -125,8 +126,17 @@ class LiveBridge:
             except ValueError:
                 self.counts['malformed_messages'] += 1
                 return
+            if not records:
+                # An HL7 message about another signal is not a missing/invalid PR
+                # observation. It must neither cancel PR nor refresh its age.
+                self.counts['messages_without_pr'] += 1
+                return
             if len(records) != 1 or not records[0]['eligible']:
                 self.counts['source_rejected'] += 1
+                reason = (records[0]['reason'] if len(records) == 1
+                          else 'ambiguous_duplicate_signal')
+                self.counts['pr_rejected_' + reason] += 1
+                self.last_invalid_reason = reason
                 self.invalid_version += 1
                 # Do not deliver a queued value after the selected signal becomes invalid.
                 if self.latest is not None:
@@ -206,6 +216,7 @@ class LiveBridge:
                 if pending['invalid_version'] != self.invalid_version:
                     self.counts['invalidated'] += 1
                     result['reason'] = 'source_invalidated_during_phy'
+                    result['source_invalid_reason'] = self.last_invalid_reason
                 elif age > self.max_age:
                     self.counts['stale_dropped'] += 1
                     result['reason'] = 'stale'

@@ -37,7 +37,11 @@ memória observados na bancada.
 1. Recebe envelopes MLLP completos e seleciona apenas PR elegível; não persiste HL7
    bruto, PID, HR ou outros sinais. Não envia comandos ou ACK HL7 ao monitor.
 2. Uma observação em voo; uma pendente latest-only. Substituições são contadas.
-   Leitura inválida limpa a fila e invalida a observação em voo. Duplicatas HL7 não
+   Leitura PR explicitamente inválida limpa a fila e invalida a observação em voo.
+   Mensagem sem observação PR é ignorada e contada em `messages_without_pr`, sem
+   cancelar PR válida ou renovar sua idade. Rejeições PR têm contadores
+   `pr_rejected_<motivo>`; invalidação informa `source_invalid_reason`.
+   Duplicatas HL7 não
    são deduplicadas por identificador; valores iguais podem ser observações novas.
 3. Codifica em memória (um frame de 10 bytes, um NC1/392 bits). Não usa MATs como
    IPC nem inicia Python por mensagem. O checkpoint Windows é exigido por SHA-256.
@@ -164,6 +168,16 @@ Testes exercitam contrato JSON, CRC/modelo/ID, ausência de fallback, idade,
 invalidação, latest-only, fechamento do listener e sockets TCP **sintéticos em
 loopback**. Não executam MATLAB, gateway Node real, React, VISA ou monitor.
 Ainda falta validar esses componentes no Windows e auditar artefatos físicos.
+
+Em 17/11, usuário relatou uma primeira tentativa física online com `codec_ok=true`,
+`source_exact_match=true`, zero erros em 392 bits e idade de 0,6472 s, mas
+`gateway_write_ok=false` por `source_invalidated_during_phy`. Foram 58 mensagens,
+29 aceitas e 29 rejeitadas na versão anterior. Esses contadores antigos não
+distinguem ausência de PR de PR explicitamente inválida: não permitem afirmar
+qual dessas situações ocorreu. Corrigido o tratamento de ausência de PR e
+acrescentados diagnósticos/regressões, mantendo bloqueio de PR inválida/ambígua.
+Atualizar `live_bridge.py`, reiniciar o processo Python e usar uma saída nova;
+preservar a tentativa anterior, sem apresentá-la como entrega ao painel.
 Seis testes adicionais exercitam dispatch/handshake, token incorreto, JSON
 inválido, fragmentação e fechamento da sessão externa. O teste MATLAB acima
 continua necessário: testes Python não executam `tcpclient`/`readline` do R2021a.

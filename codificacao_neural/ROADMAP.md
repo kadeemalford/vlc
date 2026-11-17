@@ -1,5 +1,27 @@
 # Continuidade — codificação neural de telemetria
 
+## Retomada — 17/11/2026
+
+- Usuário restaurou dados de `bench_20261116_152201.mat`, abriu VISA nova e
+  reconferiu setup; horizontal/CH1/banda/amplitude tinham mudado. Ajustes aplicados
+  com AFG OFF e preâmbulo atualizado após trigger forçado: 10 MS/s/10k conferidos.
+- Sistema completo copiado ao PC da bancada; gateway 4455/4444 e painel 5173
+  iniciados, conexão de frontend ao gateway confirmada. Handshake IPC externo
+  já havia passado na campanha anterior, conforme usuário.
+- Primeira tentativa foi iniciada sem LED/sensor preparados; orientada preservação,
+  parada/AFG OFF e nova saída/token para repetição.
+- Repetição reportada: 58 mensagens, 29 aceitas/29 rejeitadas, 28 descartes de fila,
+  uma tentativa física. `codec_ok=1`, `source_exact_match=1`, zero erros/392 bits,
+  idade 0,6472 s; gateway bloqueado por `source_invalidated_during_phy`.
+  Não houve entrega confirmada ao gateway/painel; artefatos não auditados aqui.
+- Encontrado bug: ausência de PR em uma mensagem era tratada como PR inválida e
+  cancelava fila/in-flight. Corrigido para ignorar/contar `messages_without_pr`,
+  sem renovar idade. PR explicitamente inválida/ambígua continua bloqueante.
+  Novos contadores `pr_rejected_<motivo>` e `source_invalid_reason` permitem
+  distinguir as causas; os contadores antigos não provam a origem das rejeições.
+- Próximo passo: transferir `live_bridge.py` atualizado, encerrar processo anterior,
+  AFG OFF, reiniciar ponte com novo token/saída e observar diagnósticos e painel.
+
 ## Decisão em 09/11/2026
 
 Usuário/orientador suspenderam equalização como foco e escolheram demonstração

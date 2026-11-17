@@ -125,6 +125,49 @@ class LiveBridgeTests(unittest.TestCase):
         result = json.loads(self.bridge.receive_json(waveform(req['tx_bits'])))
         self.assertTrue(result['codec_ok'])
         self.assertFalse(result['gateway_write_ok'])
+        self.assertEqual(result['source_invalid_reason'],
+                         'outside_representation_range_or_missing')
+        self.assertEqual(self.bridge.counts[
+            'pr_rejected_outside_representation_range_or_missing'], 1)
+        self.assertEqual(self.sent, [])
+
+    def test_message_without_pr_preserves_queued_observation(self):
+        self.bridge.feed_message(message(value='70'))
+        self.bridge.feed_message(message(signal='heart_rate', value='80'))
+        req = json.loads(self.bridge.next_json())
+        result = json.loads(self.bridge.receive_json(waveform(req['tx_bits'])))
+        self.assertTrue(result['gateway_write_ok'])
+        self.assertEqual(self.sent[0]['payload']['variables'][0]['value'], '70')
+        self.assertEqual(self.bridge.counts['messages_without_pr'], 1)
+        self.assertEqual(self.bridge.counts['source_rejected'], 0)
+        self.assertEqual(self.bridge.counts['queue_dropped'], 0)
+
+    def test_message_without_pr_does_not_invalidate_inflight(self):
+        req = self.request()
+        self.bridge.feed_message(message(signal='heart_rate', value='80'))
+        result = json.loads(self.bridge.receive_json(waveform(req['tx_bits'])))
+        self.assertTrue(result['codec_ok'])
+        self.assertTrue(result['gateway_write_ok'])
+        self.assertEqual(self.bridge.counts['invalidated'], 0)
+
+    def test_message_without_pr_does_not_refresh_observation_age(self):
+        received = time.monotonic()
+        self.bridge.feed_message(message(value='70'))
+        with patch('live_bridge.time.monotonic', return_value=received+10):
+            self.bridge.feed_message(message(signal='heart_rate', value='80'))
+            self.assertEqual(self.bridge.next_json(), '{}')
+        self.assertEqual(self.bridge.counts['stale_dropped'], 1)
+        self.assertEqual(self.sent, [])
+
+    def test_duplicate_pr_is_still_rejected_and_classified(self):
+        req = self.request()
+        body = message(value='70')
+        body += body[body.index(b'OBX|'):]
+        self.bridge.feed_message(body)
+        result = json.loads(self.bridge.receive_json(waveform(req['tx_bits'])))
+        self.assertFalse(result['gateway_write_ok'])
+        self.assertEqual(result['source_invalid_reason'], 'ambiguous_duplicate_signal')
+        self.assertEqual(self.bridge.counts['pr_rejected_ambiguous_duplicate_signal'], 1)
         self.assertEqual(self.sent, [])
 
     def test_no_retry_no_tx_fallback_and_single_inflight(self):
