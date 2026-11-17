@@ -1,5 +1,26 @@
 # Monitor somente — captura de frequência cardíaca/pulso
 
+**Diagnóstico de pressão (17/11):** `monitor_capture.py --signal pressure_inspect`
+recebe MLLP sem escrever bytes de aplicação e registra apenas estrutura de OBX
+de pressão (código/nome canônico/sub-ID/unidade/status, contagens e igualdade de
+timestamps), sem leituras numéricas, timestamps do aparelho, PID ou HL7 bruto.
+Não exporta `.bin` nem usa instrumentos/gateway. Exige também `monitor_signals.py`
+atualizado. Nunca abrir junto com a ponte na porta 2222.
+
+Após parar o runner/ponte e conferir AFG OFF, no PowerShell em `codificacao_neural`:
+
+```powershell
+$pressureDir = 'data/pressure_inspect_' + (Get-Date -Format 'yyyyMMdd_HHmmss')
+.\.venv\Scripts\python.exe monitor_capture.py --listen `
+  --host 192.168.1.2 --port 2222 --seconds 120 `
+  --signal pressure_inspect --out $pressureDir
+```
+
+Saída detalhada em `pressure_diagnostics.jsonl`, somente quando há candidatos de
+pressão. Ausência de candidatos nesta janela não comprova que o valor armazenado
+no display tenha sido transmitido. Não iniciar medições/comandos de manguito por
+este software nem relaxar pareamento a partir de valores exibidos.
+
 ## Escopo e origem dos campos
 
 Apenas o monitor de pesquisa, sem pacientes e sem controle de dispositivos.

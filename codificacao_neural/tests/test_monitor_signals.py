@@ -1,10 +1,13 @@
+import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from monitor_capture import parse_rates
-from monitor_signals import SIGNALS, compact_observation, parse_compact, parse_observations
+from monitor_capture import SessionWriter, parse_rates
+from monitor_signals import (SIGNALS, compact_observation, parse_compact,
+                             parse_observations, pressure_diagnostics)
 
 
 def signal_message(signal, value='70', unit=None, status='F'):
@@ -64,6 +67,58 @@ class MonitorSignalTests(unittest.TestCase):
                                (b'!#MDSP0000', 'oxygen_saturation')):
             with self.assertRaises(ValueError):
                 parse_compact(source, signal)
+
+    def test_pressure_diagnostic_identifies_unrecognized_mapping_without_values(self):
+        systolic = signal_message('systolic_pressure', '123456789').replace(b'150301^', b'999999^')
+        body = combined(systolic, signal_message('diastolic_pressure', '80'))
+        report = pressure_diagnostics(body)
+        self.assertEqual(report['recognized_counts'],
+                         {'systolic_pressure': 0, 'diastolic_pressure': 1})
+        field = report['pressure_fields'][0]
+        self.assertEqual(field['code'], '999999')
+        self.assertEqual(field['name'], 'MDC_PRESS_CUFF_SYS')
+        self.assertEqual(field['hints'], ['systolic_pressure'])
+        self.assertEqual(field['exact_identity_matches'], [])
+        self.assertNotIn('123456789', json.dumps(report))
+
+    def test_pressure_diagnostic_no_free_text_or_device_timestamps(self):
+        body = signal_message('systolic_pressure', '123456789')
+        body = body.replace(b'MDC_PRESS_CUFF_SYS', b'SYNTHETIC_PRIVATE_TEXT')
+        body = body.replace(b'1.1.9.150301', b'SYNTHETIC_PRIVATE_SUBID')
+        fields = body.rstrip(b'\r').split(b'\r')[-1].split(b'|')
+        fields += [b''] * (15-len(fields))
+        fields[14] = b'20261117123456'
+        body = body[:body.index(b'OBX|')] + b'PID|||SYNTHETIC_PRIVATE_ID\r' + b'|'.join(fields) + b'\r'
+        report = pressure_diagnostics(body)
+        serialized = json.dumps(report)
+        for text in ('SYNTHETIC_PRIVATE', '123456789', '20261117123456', 'PID|', 'OBX|', 'MSH|'):
+            self.assertNotIn(text, serialized)
+        self.assertTrue(report['pressure_fields'][0]['sample_time_present'])
+        self.assertEqual(report['pressure_fields'][0]['name'], 'other')
+
+    def test_pressure_inspect_exports_no_frames_or_numeric_readings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            writer = SessionWriter(Path(folder)/'pressure', 'pressure_inspect')
+            writer.consume(combined(signal_message('systolic_pressure', '120'),
+                                    signal_message('diastolic_pressure', '80')), 1)
+            self.assertEqual(writer.exported, [])
+            self.assertFalse(list(writer.out.glob('*.bin')))
+            self.assertFalse((writer.out/'observations.jsonl').exists())
+            row = json.loads((writer.out/'pressure_diagnostics.jsonl').read_text())
+            self.assertEqual(row['recognized_counts'],
+                             {'systolic_pressure': 1, 'diastolic_pressure': 1})
+            self.assertTrue(row['sample_times_equal'])
+            self.assertFalse(any('value' in field for field in row['pressure_fields']))
+
+    def test_pressure_inspect_distinguishes_separate_envelopes(self):
+        systolic = pressure_diagnostics(signal_message('systolic_pressure', '120'))
+        diastolic = pressure_diagnostics(signal_message('diastolic_pressure', '80'))
+        self.assertEqual(systolic['recognized_counts'],
+                         {'systolic_pressure': 1, 'diastolic_pressure': 0})
+        self.assertEqual(diastolic['recognized_counts'],
+                         {'systolic_pressure': 0, 'diastolic_pressure': 1})
+        self.assertIsNone(systolic['sample_times_equal'])
+        self.assertIsNone(diastolic['sample_times_equal'])
 
 
 if __name__ == '__main__':

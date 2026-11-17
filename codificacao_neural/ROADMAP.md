@@ -4,6 +4,19 @@
 
 ### Estado mais recente
 
+- Primeiro ensaio ampliado: usuário confirmou HR/FC, SpO₂ e PR corretas no painel,
+  mas não pressão, apesar de valor visível no aparelho. Resumo SYS:
+  absent_messages=178, source_rejected=1,
+  rejected_incomplete_or_duplicate_pressure_pair=1; DIA: absent_messages=177
+  e mesmas duas rejeições. Não há evidência de um par aceito/transportado.
+- Ainda não distinguir ausência na transmissão, identidade não reconhecida,
+  duplicidade ou separação em envelopes. Mantida a regra de pareamento.
+  Adicionado `--signal pressure_inspect` ao coletor: diagnóstico estrutural sem
+  valores, PID, timestamp bruto ou HL7 persistido; não usa VLC/gateway, não gera
+  frames nem envia comandos/ACK. Requer `monitor_signals.py` atualizado.
+  Próxima ação: encerrar ponte/AFG OFF e observar estrutura de pressão na porta2222
+  em uma pasta nova, preservando a tentativa multivariável.
+
 - Após corrigir ausência de PR, usuário reportou 58 mensagens, 29 PRs aceitas,
   29 sem PR ignoradas, 29 tentativas/codec_ok/escritas gateway. Na tentativa 29,
   zero erros/392 bits, source_exact_match=1, idade 0,3647 s.

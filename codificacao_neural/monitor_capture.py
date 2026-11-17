@@ -12,7 +12,7 @@ from pathlib import Path
 import socket
 import time
 
-from monitor_signals import parse_observations
+from monitor_signals import parse_observations, pressure_diagnostics
 
 RATES = {
     'heart_rate': ('147842', 'MDC_ECG_HEART_RATE', '1.7.4.147842', 'HR'),
@@ -65,8 +65,8 @@ def compact_frame(record):
 
 class SessionWriter:
     def __init__(self, out, signal):
-        if signal not in ('inspect', *RATES):
-            raise ValueError('Select inspect, heart_rate or pulse_rate')
+        if signal not in ('inspect', 'pressure_inspect', *RATES):
+            raise ValueError('Select inspect, pressure_inspect, heart_rate or pulse_rate')
         self.out = Path(out)
         self.out.mkdir(parents=True, exist_ok=False)
         self.signal = signal
@@ -77,6 +77,16 @@ class SessionWriter:
 
     def consume(self, message, elapsed_seconds):
         self.messages += 1
+        if self.signal == 'pressure_inspect':
+            diagnostic = pressure_diagnostics(message)
+            for signal, count in diagnostic['recognized_counts'].items():
+                self.signals[signal] += count
+            if diagnostic['pressure_fields']:
+                row = dict(message_index=self.messages, elapsed_seconds=elapsed_seconds, **diagnostic)
+                with (self.out/'pressure_diagnostics.jsonl').open('a', encoding='utf-8') as stream:
+                    stream.write(json.dumps(row, allow_nan=False) + '\n')
+                print(json.dumps(row, allow_nan=False), flush=True)
+            return
         rows = parse_rates(message)
         for record in rows:
             self.signals[record['signal']] += 1
@@ -121,7 +131,8 @@ def capture(host, port, seconds, signal, out, max_samples=1):
         (writer.out/'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
 
     def done():
-        return time.monotonic() >= deadline or (signal != 'inspect' and len(writer.exported) >= max_samples)
+        return time.monotonic() >= deadline or (
+            signal not in ('inspect', 'pressure_inspect') and len(writer.exported) >= max_samples)
 
     persist()
     try:
@@ -187,7 +198,7 @@ def main():
     parser.add_argument('--host', required=True, help='Local laboratory interface IPv4 address')
     parser.add_argument('--port', type=int, default=2222)
     parser.add_argument('--seconds', type=float, default=60)
-    parser.add_argument('--signal', choices=('inspect', *RATES), default='inspect')
+    parser.add_argument('--signal', choices=('inspect', 'pressure_inspect', *RATES), default='inspect')
     parser.add_argument('--max-samples', type=int, default=1)
     parser.add_argument('--out', required=True)
     args = parser.parse_args()

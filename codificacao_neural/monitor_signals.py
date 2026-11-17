@@ -99,3 +99,49 @@ def parse_compact(source, expected_signal):
     if not 1 <= value <= spec['maximum']:
         raise ValueError('Invalid compact monitor value')
     return value
+
+
+def pressure_diagnostics(message):
+    """Structural diagnostics only: no readings, device timestamps, PID or raw HL7."""
+    records = parse_observations(message, PRESSURE_SIGNALS)
+    fields_seen = []
+    known_names = {spec['name'] for spec in SIGNALS.values()}
+    for line in message.replace(b'\r\n', b'\r').replace(b'\n', b'\r').split(b'\r'):
+        fields = line.split(b'|')
+        if len(fields) < 4 or fields[0] != b'OBX':
+            continue
+        identity = fields[3].split(b'^')
+        code = identity[0]
+        name = identity[1] if len(identity) > 1 else b''
+        sub_id = fields[4] if len(fields) > 4 else b''
+        hints = [signal for signal in PRESSURE_SIGNALS
+                 if code == SIGNALS[signal]['code'].encode()
+                 or name == SIGNALS[signal]['name'].encode()
+                 or sub_id == SIGNALS[signal]['sub_id'].encode()]
+        if not hints and b'PRESS' not in name:
+            continue
+        units = fields[6].split(b'^') if len(fields) > 6 else []
+        status = fields[11] if len(fields) > 11 else b''
+        # Unknown free text is deliberately never echoed, even in an OBX field.
+        fields_seen.append(dict(
+            hints=hints,
+            code=code.decode('ascii') if re.fullmatch(rb'[0-9]{1,9}', code) else 'other',
+            name=name.decode('ascii') if name in {n.encode() for n in known_names} else 'other',
+            sub_id=sub_id.decode('ascii') if re.fullmatch(rb'[0-9.]{1,32}', sub_id) else 'other',
+            obx_type='NM' if fields[2] == b'NM' else 'other',
+            unit='MDC_DIM_MMHG' if len(units) > 1 and units[1] == b'MDC_DIM_MMHG' else 'other',
+            status=status.decode('ascii') if status in (b'F', b'C') else 'other',
+            sample_time_present=bool(fields[14]) if len(fields) > 14 else False,
+            exact_identity_matches=[s for s in PRESSURE_SIGNALS
+                                    if identity[:2] == [SIGNALS[s]['code'].encode(),
+                                                        SIGNALS[s]['name'].encode()]]))
+    grouped = {s: [r for r in records if r['signal'] == s] for s in PRESSURE_SIGNALS}
+    same_time = None
+    if all(len(grouped[s]) == 1 for s in PRESSURE_SIGNALS):
+        same_time = grouped[PRESSURE_SIGNALS[0]][0]['sample_time'] == grouped[PRESSURE_SIGNALS[1]][0]['sample_time']
+    return dict(
+        pressure_fields=fields_seen,
+        recognized_counts={s: len(rows) for s, rows in grouped.items()},
+        eligibility={s: [dict(eligible=r['eligible'], reason=r['reason']) for r in rows]
+                     for s, rows in grouped.items()},
+        sample_times_equal=same_time)

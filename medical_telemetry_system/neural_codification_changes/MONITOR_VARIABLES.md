@@ -6,6 +6,12 @@ usuário no painel, inclusive inatividade após parada e AFG OFF. Artefatos aind
 não auditados aqui. O artigo-base inclui outros equipamentos; continuam excluídos
 ventilador, bombas, alarmes, temperatura, respiração e pressão média.
 
+**Atualização de bancada:** usuário confirmou HR/FC, SpO₂ e PR no painel. Pressão
+não apareceu: contadores indicam rejeição por par incompleto/duplicado, ainda sem
+causa identificada. O diagnóstico vigente está em
+[`../../codificacao_neural/MONITOR.md`](../../codificacao_neural/MONITOR.md), modo
+`pressure_inspect`. Não relaxar a regra ou afirmar validação física de SYS/DIA.
+
 ## Campos selecionados
 
 | `opts.signals` | OBX-3 / OBX-4 | Frame sintético | Painel / unidade |
